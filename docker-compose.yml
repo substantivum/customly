@@ -1,0 +1,12 @@
+services:
+  customly:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data          # sqlite file persists here
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/bot.db') else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
