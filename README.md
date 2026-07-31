@@ -44,9 +44,9 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 |---|---|---|
 | `/register riot_id` | player | tag only; rank/RR/peak optional |
 | `/profile [member]` | player | |
-| `/custom create name format start maps [team_size]` | admin (owner) | spawns `#<creator>-<name>`; team_size 1–5 (1v1…5v5) |
+| `/custom create name format start maps [team_size] [draft]` | admin (owner) | spawns `#<creator>-<name>`; team_size 1–5 (1v1…5v5); `maps:competitive` = current competitive pool; `draft` = snake or one-by-one |
 | `/custom register \| leave \| list` | player | overlap-checked registration |
-| `/custom transfer <id> to:@user` | owner / superadmin | reassigns ownership |
+| `/custom transfer <id> to:@user` | owner / superadmin | reassigns ownership; redraws the embed + DMs the new owner |
 | `/custom delete <id> [force]` | owner / superadmin | occupancy guard; `force` = superadmin |
 | `/custom prune [force]` | superadmin | deletes all customs |
 | `/queue status <id>` | player | |
@@ -57,6 +57,7 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 | `/panel` | everyone | button hub: Customs / Admin panel / Super Admin |
 | `/match result <id> map a b` | captain / admin | records a map score |
 | `/maps list \| seed \| add \| remove \| toggle` | admin | |
+| `/maps competitive [maps]` | admin | sets the current competitive pool (blank clears it) |
 | `/admin grant \| revoke \| audit` | superadmin / admin | |
 | `/stats me \| leaderboard` | player | |
 
@@ -72,36 +73,44 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 3. **Start** — owner runs `/match start` (full queue) or `/match forcestart`
    (manual start with the current registrants — must be even and ≥4). Captains
    are chosen by `random` / `manual` (pass `captain_a`/`captain_b`) /
-   `highest_rr` / `highest_peak`, then a **snake draft** (A, BB, AA, …) runs via
-   a player Select. **Team size is set per custom (2v2 … 5v5).**
-4. **Veto** — uses the **custom's** map pool. BO1 alternates bans to one;
+   `highest_rr` / `highest_peak`. **Team size is set per custom (2v2 … 5v5).**
+4. **Coin toss** — a random captain calls heads or tails; the toss winner then
+   takes **first or second pick**, which opens the draft on their side.
+5. **Draft** — a player Select, turn-gated, in the custom's chosen mode:
+   **snake** (A, BB, AA, …) or **one by one** (A, B, A, B, …). Both are set at
+   creation. A per-turn timer auto-picks if a captain stalls.
+6. **Veto** — uses the **custom's** map pool. BO1 alternates bans to one;
    BO3/BO5 follow ban/ban/pick…/decider. Buttons per remaining map, turn-gated.
-5. **Voice** — when veto starts the bot creates `team_a_<id>` / `team_b_<id>`
+7. **Sides** — veto done, the team that did **not** make the last ban picks
+   **attack or defence** on the decider; it lands in the lobby embed.
+8. **Voice** — when veto starts the bot creates `<custom>-a-<captain>` /
+   `<custom>-b-<captain>` (e.g. `friday-5v5-a-salta`)
    under the Customs category and **moves already-connected players** in. The
    channels are **open to everyone**, so friends and observers just join. Players
    are moved **once, at game start** only — afterwards they can leave and rejoin
    freely. Discord can't pull someone who isn't in voice; those players simply
    join the channel themselves.
-6. **Lobby** — veto done, the bot posts the match lobby in the custom's channel
+9. **Lobby** — sides chosen, the bot posts the match lobby in the custom's channel
    with **Set party code** and **End custom** buttons. Any registered player can
    use them; setting the code updates the lobby embed in place.
-7. **End** — ending marks the match completed and deletes the custom's team VCs
+10. **End** — ending marks the match completed and deletes the custom's team VCs
    **and** its text channel.
-8. **Delete/prune guard** — teardown is blocked while **both** team VCs are
+11. **Delete/prune guard** — teardown is blocked while **both** team VCs are
    occupied (game in progress). Superadmin can `force`, which disconnects
    members first.
 
 ## Implemented vs stubbed
 
 **Fully wired:** identity/registration, customs (create + dedicated channel),
-overlap scheduling, queue fill, ownership + transfer, delete/prune with the
-occupancy guard, captain selection, snake draft, BO1/3/5 veto, team-VC creation
-+ one-time auto-move, party code (open to all), player bans, maps, roles/permissions, audit log, Docker.
+overlap scheduling, queue fill, ownership + transfer (embed redraw + owner DM),
+delete/prune with the occupancy guard, captain selection, coin toss for pick
+order, snake **or** one-by-one draft, BO1/3/5 veto, attack/defence side pick,
+team-VC creation + one-time auto-move, party code (open to all), player bans,
+maps incl. the competitive pool, roles/permissions, audit log, Docker.
 
 **Stubbed (schema + hooks exist, logic minimal):** tournaments (single/double
 elim, round robin, swiss) and brackets; stats accrual on results, Elo updates,
-MVP voting, predictions, achievements, seasons/leaderboard depth; draft/veto
-auto-pick-on-timeout timers (APScheduler is started; jobs are TODO); substitute
+MVP voting, predictions, achievements, seasons/leaderboard depth; substitute
 and ready-check views. These are intentionally left as extension points.
 
 ## Notes

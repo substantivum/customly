@@ -1,8 +1,8 @@
 # Valorant Customs & Tournament Bot — Manual
 
 A Discord bot that runs Valorant custom games end to end: registration, scheduling,
-captain selection, snake draft, map veto, team voice channels, party codes,
-bans, stats and an audit log. Everything is doable via slash commands
+captain selection, coin toss, player draft, map veto, side selection, team voice
+channels, party codes, bans, stats and an audit log. Everything is doable via slash commands
 **or** the `/panel` button interface.
 
 **Stack:** Python 3.12 · discord.py · SQLite (WAL) · Docker. No Riot API — a Riot ID
@@ -133,9 +133,10 @@ of inactivity.
 - **My stats** — your record
 
 **🛡 Admin panel**
-- **Create custom** — pick the map pool from a dropdown, then a modal for
-  name / format / team size / start
-- **Maps** — seed, add, and toggle any number of maps on/off in one go
+- **Create custom** — pick the map pool (or hit **⭐ Competitive pool**) and the
+  draft mode from dropdowns, then a modal for name / format / team size / start
+- **Maps** — seed, add, and toggle any number of maps on/off in one go, and set
+  the **⭐ competitive pool** (ticking a map there enables it for play)
 - **Manage customs** — pick one → **Start / Force start / End** / transfer / delete
 - **Bans** — pick a player → Ban (reason modal) / Unban / List
 - **Audit** — recent audit entries
@@ -170,8 +171,8 @@ of inactivity.
 ### Admin (owner of the custom unless noted)
 | Command | Description |
 |---|---|
-| `/custom create name format start [maps] [team_size]` | Create a custom (run in `#custom-config`); **maps optional — blank = all enabled** |
-| `/custom transfer custom_id to:@user` | Hand ownership to another admin |
+| `/custom create name format start [maps] [team_size] [draft]` | Create a custom (run in `#custom-config`); **maps optional — blank = all enabled**, or `competitive` for the competitive pool; **draft** = snake (default) or one by one |
+| `/custom transfer custom_id to:@user` | Hand ownership to another admin — the registration embed is redrawn and the new owner is notified (DM + a note in the custom's channel) |
 | `/custom delete custom_id [force]` | Delete a custom (occupancy guard; `force` = superadmin) |
 | `/match start custom_id [captains] [captain_a] [captain_b]` | Start when the queue is full |
 | `/match forcestart custom_id [captains] …` | Start now with current players (even, ≥2) |
@@ -179,6 +180,7 @@ of inactivity.
 | `/match end custom_id` | End the match: mark done, delete the custom's voice **and** text channels |
 | `/match partycode custom_id code` | Set the party code (any registered player); posted openly |
 | `/maps list\|seed\|add\|remove\|toggle` | Manage the map pool |
+| `/maps competitive [maps]` | Set the current competitive pool (comma-separated; blank clears it). Maps in it are enabled automatically |
 | `/admin ban member [reason]` · `/admin unban member` · `/admin bans` | Block/allow players from future games |
 | `/admin audit [limit]` | Recent audit entries |
 
@@ -201,6 +203,10 @@ of inactivity.
   that already passed today is taken as tomorrow.
 - **maps:** comma-separated, must be in the enabled pool. **Optional** — leave it
   blank to use **all enabled maps** in the server pool (run `/maps seed` first).
+  Type `competitive` (or hit **⭐ Competitive pool** in the panel) to take the
+  server's current competitive pool — see §8.13.
+- **draft:** how the captains pick — **snake** (A, BB, AA, … — default) or
+  **one by one** (A, B, A, B, …). Shown on the registration embed.
 
 The bot creates a dedicated `#<your-name>-<custom-name>` text channel with a registration embed
 (Register / Leave buttons). The channel is **read-only**: everyone can see it and use
@@ -226,13 +232,31 @@ A custom that's already `captains`/`veto`/`live` can't be re-started — delete 
 reset. From the panel, **start / force start / end / transfer / delete** all live under
 **Manage customs → pick a custom**.
 
-### 8.4 Snake draft
-The two captains draft the remaining players in snake order (A, BB, AA, …) from a
-dropdown. Each turn has a timer (`DRAFT_PICK_SECONDS`); if a captain stalls, the bot
+### 8.4 Coin toss
+Before anyone drafts, the bot posts a coin toss in the custom's channel:
+
+1. A **random captain** is put on the clock and calls **Heads** or **Tails**.
+2. The coin lands; whoever called it right **wins the toss**.
+3. The toss winner picks **First pick** or **Second pick** — that decides which
+   side opens the draft (the whole draft order mirrors accordingly).
+
+Only the captain on the clock can click. Each step has the draft timer
+(`DRAFT_PICK_SECONDS`); on timeout the bot decides that step at random and marks
+the result _(auto)_. In a 1v1 there's nobody to draft, so the toss is skipped.
+
+### 8.5 Draft — snake or one by one
+The two captains draft the remaining players from a dropdown, starting with the
+side that won first pick. The order comes from the custom's **draft mode**, set
+at creation:
+
+- **🐍 Snake** — A, BB, AA, BB … (the default; evens out the first-pick edge)
+- **🔁 One by one** — A, B, A, B … (strict alternation, so first pick is worth more)
+
+Each turn has a timer (`DRAFT_PICK_SECONDS`); if a captain stalls, the bot
 **auto-drafts a random remaining player**. In a 1v1 there's nobody to draft, so this
 step is skipped automatically.
 
-### 8.5 Map veto
+### 8.6 Map veto
 Uses the **custom's** map pool. BO1 alternates bans down to one; BO3/BO5 open with
 ban/ban/pick… then alternate bans through any surplus maps to the decider, so a pool
 of any size resolves to the right number of maps. Minimum pool: **2** for BO1,
@@ -241,42 +265,76 @@ Buttons appear per remaining map; only the captain on the
 clock may act. Each turn has a timer (`VETO_PICK_SECONDS`); on timeout the bot
 **bans/picks a random remaining map**.
 
-### 8.6 Going live — the match lobby
-When veto finishes, the bot marks the match **live** and posts the **lobby** in the
-custom's own channel: both teams (👑 marks the captain), the chosen maps, the party
-code, and links to the team voice channels. Two buttons sit under it:
+### 8.7 Attack or defence
+Veto done, the bot asks for sides on the **decider** (the last map standing): the
+team that did **not** make the last ban picks **🔫 Attack** or **🛡 Defence**, and
+the other team takes the opposite. Only that team's captain can click; on timeout
+(`VETO_PICK_SECONDS`) the bot picks at random and marks it _(auto)_. The choice is
+announced in the channel and shown in the lobby embed. (If a veto had no bans at
+all — a minimum-size BO3 pool — the last team to act loses the choice instead.)
+
+### 8.8 Going live — the match lobby
+When sides are settled, the bot marks the match **live** and posts the **lobby** in
+the custom's own channel: both teams (👑 marks the captain), the chosen maps, the
+sides, the party code, and links to the team voice channels. Two buttons sit under it:
 
 - **🔑 Set party code** — opens a small modal; the lobby embed updates in place.
-- **🏁 End custom** — ends the match (see 8.9).
+- **🏁 End custom** — ends the match (see 8.11).
 
 Both work for **anyone registered for that custom**, plus admins. Discord can't hide
 a button from specific viewers, so everyone sees them, but a click from someone who
 isn't in the custom is refused with a private message. The buttons are persistent —
 they keep working after a bot restart.
 
-### 8.7 Voice channels
-At game start the bot creates `team_a_<id>` and `team_b_<id>` under the customs
-category. **The channels are open** — anyone can connect, so friends and observers
+### 8.9 Voice channels
+At game start the bot creates one voice channel per team under the customs
+category, named after the custom, the side and that team's captain —
+`friday-5v5-a-salta` / `friday-5v5-b-nex` — so several concurrent customs are easy
+to tell apart. **The channels are open** — anyone can connect, so friends and observers
 just join, and there's nothing to grant. The bot does a **one-time move** of
 already-connected players into their team VC; after that, players may leave and
 rejoin freely and are never auto-moved again. Anyone not connected at start simply
 joins the channel themselves.
 
-### 8.8 Party code
+### 8.10 Party code
 Lobby → **🔑 Set party code** (preferred), or `/match partycode custom_id code`.
 Settable by **any player registered for the custom** (and admins), and visible to
 everyone. The match must have started first — the code lives on the match.
 
-### 8.9 End a match
+### 8.11 End a match
 Lobby → **🏁 End custom**, `/match end custom_id`, or panel → **Manage customs →
 End**. Any registered player can end it once it has started. Ending marks the match
 completed and the custom done, then **deletes the team voice channels and the
 custom's text channel** (anyone still in voice is moved to `DEFAULT_VOICE_CHANNEL`,
 or disconnected if that isn't set). The DB records are kept for stats/audit.
 
-### 8.10 Results
+### 8.12 Results
 `/match result match_id map_name score_a score_b` records each map's score and
 winner. Restricted to a captain of that match or an admin.
+
+### 8.13 The competitive map pool
+Riot's active rotation is a subset of every map that exists, and it changes every
+few acts. Rather than re-ticking it on every custom, mark it once:
+
+- **Panel → 🛡 Admin panel → Maps → ⭐ Competitive pool** — tick the maps in the
+  current rotation. The selection *replaces* the pool (untick everything to clear
+  it), and anything in it is enabled for play automatically.
+- Or `/maps competitive maps:Ascent,Bind,Haven,…` — blank clears the pool.
+
+Once set, custom creation can take it in one step: the **⭐ Competitive pool**
+button in the panel, or `maps:competitive` on `/custom create`. `/maps list` and
+the Maps panel mark pool members with ⭐.
+
+### 8.14 Transferring a custom
+`/custom transfer custom_id to:@user`, or panel → **Manage customs → Transfer
+ownership to…**. The owner or a superadmin can do it. On transfer the bot:
+
+- rewrites the **registration embed** so its Owner field shows the new owner,
+- posts a note in the custom's channel, and
+- **DMs the new owner** (if their DMs are closed, the channel note still tells them).
+
+The new owner gets the full owner toolkit — start, force start, end, transfer,
+delete — under **Manage customs**.
 
 ---
 
@@ -290,8 +348,8 @@ registration → full → captains → veto → live
 
 - **registration** — open for sign-ups
 - **full** — queue filled
-- **captains / veto** — match running (draft then veto)
-- **live** — teams set, maps chosen, lobby posted
+- **captains / veto** — match running (coin toss → draft → veto → sides)
+- **live** — teams set, maps and sides chosen, lobby posted
 - **done** — match ended (`/match end`)
 
 ---
@@ -301,8 +359,10 @@ registration → full → captains → veto → live
 - **Bans:** `/admin ban`, `/admin unban`, `/admin bans` (or panel → Bans). A ban
   blocks the player from registering for any future custom in the server.
 - **Maps:** `/maps seed|add|remove|toggle`. Disabled maps can't be put in a pool.
+  `/maps competitive` (or the panel) sets the ⭐ competitive pool — see §8.13.
 - **Ownership:** `/custom transfer` reassigns a custom; the new owner must be an
-  admin. Registrations and channels are untouched.
+  admin. Registrations and channels are untouched — the registration embed is
+  redrawn and the new owner is notified (§8.14).
 - **Delete / prune:** `/custom delete` (own) / `/custom prune` (all, superadmin).
   Cascades the registrations, queue, the custom's text channel and team VCs.
 - **Occupancy guard:** delete/prune is blocked while **both** team voice channels
@@ -328,12 +388,12 @@ registration → full → captains → veto → live
 | Symptom | Cause / fix |
 |---|---|
 | Slash commands don't appear | Global sync can take ~1h. Set `GUILD_ID` for instant sync in your server. |
-| Buttons do nothing after a restart | Registration buttons persist; in-flight draft/veto views don't. Delete and recreate the custom. |
+| Buttons do nothing after a restart | Registration buttons persist; in-flight coin toss / draft / veto / side views don't. Delete and recreate the custom. |
 | Veto seems stuck / won't advance | Old versions had no veto→live step. On the current build it auto-advances; a custom stuck from before must be `/custom delete`d and recreated. |
 | `/match start` says "already in progress" | The custom is in captains/veto/live. Run `/custom delete` to reset, then start again. |
 | Party code says "hasn't started a match yet" | It needs `/match start` first — the code lives on the match. |
 | Players aren't moved into team VCs | The bot needs **Move Members** + a role above them, and **Server Members**/**Voice State** intents enabled. Players not in voice at start can't be pulled — they join the channel themselves. |
-| `team_size` column error on an old DB | Schema changed. Delete `bot.db` (dev) or `ALTER TABLE customs ADD COLUMN team_size INTEGER DEFAULT 5;`. Same idea for `bans` / `match_spectators` tables — easiest is to let a fresh DB build. |
+| Missing-column error on an old DB | On boot the bot adds any columns the models gained (`draft_mode`, `vc_a`/`vc_b`, `maps.competitive`, the match's side pick, …). If a DB predates that and still errors, delete `bot.db` (dev) or add the column by hand, e.g. `ALTER TABLE customs ADD COLUMN team_size INTEGER DEFAULT 5;`. |
 | Docker "mount source path … file exists" (WSL) | Run `wsl --shutdown`, restart Docker Desktop, then `docker compose down && up`. Or switch `./data` to a named volume. Keep the project under `/home/...`, not `/mnt/c/...`. |
 | Permission errors creating channels/VCs | The bot needs **Manage Channels**. |
 
@@ -348,8 +408,10 @@ registration → full → captains → veto → live
   across container rebuilds).
 - Backup = copy the `bot.db` file while the bot is idle, or, with a named volume:
   `docker run --rm -v botdata:/data -v "$PWD":/backup alpine cp /data/bot.db /backup/`.
-- Schema is created on first boot. For production, adopt Alembic migrations rather
-  than relying on auto-create.
+- Schema is created on first boot, and each boot also **adds any columns the models
+  have gained** since the DB was made (SQLite `ADD COLUMN`, non-destructive — old
+  rows take the column default). Column *removals* and type changes are not handled:
+  for production, adopt Alembic migrations rather than relying on auto-create.
 
 ---
 
@@ -358,7 +420,7 @@ registration → full → captains → veto → live
 `/admin audit` · `/admin ban` · `/admin bans` · `/admin grant` · `/admin revoke` ·
 `/admin unban` · `/custom create` · `/custom delete` · `/custom leave` ·
 `/custom list` · `/custom prune` · `/custom register` · `/custom transfer` ·
-`/maps add` · `/maps list` · `/maps remove` · `/maps seed` · `/maps toggle` ·
-`/match forcestart` · `/match partycode` · `/match result` ·
+`/maps add` · `/maps competitive` · `/maps list` · `/maps remove` · `/maps seed` ·
+`/maps toggle` · `/match end` · `/match forcestart` · `/match partycode` · `/match result` ·
 `/match start` · `/panel` · `/profile` · `/queue status` · `/register` ·
 `/stats leaderboard` · `/stats me`

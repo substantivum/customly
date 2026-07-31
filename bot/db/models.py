@@ -75,6 +75,9 @@ class Map(Base):
     guild_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(32), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # part of the guild's "current competitive pool" — a named subset admins keep
+    # in sync with Riot's active rotation, offered as one click at custom creation
+    competitive: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 # ----------------------------------------------------------------- customs ---
@@ -87,9 +90,15 @@ class Custom(Base):
     duration_h: Mapped[int] = mapped_column(Integer)         # 1/3/5
     team_size: Mapped[int] = mapped_column(Integer, default=5)  # players per side (2-5)
     map_pool: Mapped[str] = mapped_column(Text)              # JSON list
+    draft_mode: Mapped[str] = mapped_column(String(16), default="snake")  # snake|alternate
     start_time: Mapped[datetime] = mapped_column()           # ISO, overlap checks
     vc_category: Mapped[int | None] = mapped_column(Integer)
     reg_channel: Mapped[int | None] = mapped_column(Integer)  # #custom-<id>
+    reg_message: Mapped[int | None] = mapped_column(Integer)  # registration embed
+    # team voice channels: their names carry the captain's nickname, so the ids
+    # are what the lifecycle (occupancy guard, teardown, lobby links) looks up
+    vc_a: Mapped[int | None] = mapped_column(Integer)
+    vc_b: Mapped[int | None] = mapped_column(Integer)
     config_chan: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(16), default="registration")
     match_id: Mapped[int | None] = mapped_column(Integer)
@@ -142,6 +151,12 @@ class Match(Base):
     start_time: Mapped[datetime | None] = mapped_column()
     created_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    # coin toss → who picked first in the draft
+    first_pick_side: Mapped[str | None] = mapped_column(String(1))    # A|B
+    # attack/defence on the decider, chosen by the team that didn't ban it away
+    side_map: Mapped[str | None] = mapped_column(String(32))
+    side_pick: Mapped[str | None] = mapped_column(String(8))          # attack|defence
+    side_pick_side: Mapped[str | None] = mapped_column(String(1))     # A|B
 
 
 class MatchTeam(Base):

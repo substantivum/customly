@@ -24,13 +24,20 @@ class CustomCog(commands.GroupCog, name="custom"):
     @require("admin")
     @app_commands.describe(
         name="Custom name", format="BO1/BO3/BO5", start="HH:MM (server time) or ISO",
-        maps="Comma-separated pool (optional — defaults to all enabled maps)",
+        maps="Comma-separated pool, or `competitive` for the current competitive "
+             "pool (optional — defaults to all enabled maps)",
         team_size="Players per side: 1 (1v1) … 5 (5v5). Default 5.",
+        draft="How players are drafted: snake, or one by one. Default snake.",
     )
+    @app_commands.choices(draft=[
+        app_commands.Choice(name="Snake (A, BB, AA, …)", value="snake"),
+        app_commands.Choice(name="One by one (A, B, A, B, …)", value="alternate"),
+    ])
     async def create(
         self, itx: discord.Interaction, name: str, format: str, start: str,
         maps: str = "",
         team_size: app_commands.Range[int, 1, 5] = 5,
+        draft: app_commands.Choice[str] | None = None,
     ):
         if settings.custom_config_channel and itx.channel_id != settings.custom_config_channel:
             raise PermissionDenied("Use the dedicated #custom-config channel.")
@@ -38,7 +45,7 @@ class CustomCog(commands.GroupCog, name="custom"):
         await itx.response.defer(ephemeral=True)
         c = await actions.create_custom_flow(
             itx, name=name, fmt=format, start_raw=start, maps_csv=maps,
-            team_size=team_size,
+            team_size=team_size, draft_mode=draft.value if draft else "snake",
         )
         reg = itx.guild.get_channel(c.reg_channel)
         await reply(itx, f"Created **Custom #{c.custom_id}** ({c.team_size}v{c.team_size}) → "
@@ -72,15 +79,12 @@ class CustomCog(commands.GroupCog, name="custom"):
 
     @app_commands.command(description="Transfer ownership of a custom.")
     async def transfer(self, itx: discord.Interaction, custom_id: int, to: discord.Member):
-        async with SessionLocal() as s:
-            c = await s.get(Custom, custom_id)
-        if not c:
-            raise BotError("Custom not found.")
-        if not await can_manage_custom(c, itx.user):
-            raise PermissionDenied("Only the owner or a superadmin can transfer.")
-        await custom_svc.transfer(custom_id, to.id)
-        await audit.log(itx.guild_id, itx.user.id, "custom_transfer", str(custom_id), to=to.id)
-        await reply(itx, f"Ownership of Custom #{custom_id} → {to.mention}")
+        # Redraws the registration embed and DMs the new owner — more than the
+        # 3s an un-acknowledged interaction survives.
+        await itx.response.defer(ephemeral=True)
+        await actions.transfer_custom(itx, custom_id, to)
+        await reply(itx, f"Ownership of Custom #{custom_id} → {to.mention} "
+                         f"(they've been notified).")
 
     @app_commands.command(description="Delete a custom by id (owner/superadmin).")
     @app_commands.describe(force="Superadmin override of the occupancy guard")

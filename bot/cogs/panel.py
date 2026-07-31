@@ -32,6 +32,8 @@ from bot.db import SessionLocal
 from bot.db.models import AuditLog, Custom, Map, MemberRole, PlayerStats, User
 from bot.services import custom as custom_svc
 from bot.services import bans as bans_svc
+from bot.services import draft as draft_svc
+from bot.services import maps as maps_svc
 from bot.services import queue_svc
 from bot.services.identity import normalize_tag
 
@@ -53,21 +55,8 @@ async def _guard(itx: discord.Interaction, level: int) -> bool:
     return False
 
 
-async def _enabled_maps(guild_id: int) -> list[Map]:
-    async with SessionLocal() as s:
-        rows = await s.execute(
-            select(Map).where(Map.guild_id == guild_id, Map.enabled.is_(True))
-            .order_by(Map.name)
-        )
-        return [r[0] for r in rows.all()]
-
-
-async def _all_maps(guild_id: int) -> list[Map]:
-    async with SessionLocal() as s:
-        rows = await s.execute(
-            select(Map).where(Map.guild_id == guild_id).order_by(Map.name)
-        )
-        return [r[0] for r in rows.all()]
+_enabled_maps = maps_svc.enabled_maps
+_all_maps = maps_svc.all_maps
 
 
 async def _active_customs(guild_id: int, owned_by: int | None = None) -> list[Custom]:
@@ -124,8 +113,8 @@ class ProfileModal(discord.ui.Modal, title="Your profile"):
 
 
 class CreateCustomModal(discord.ui.Modal, title="Create custom"):
-    """Step 2 of creation — the map pool was already chosen in CreateCustomView.
-    (Discord modals cannot contain dropdowns, hence the two steps.)"""
+    """Step 2 of creation — map pool and draft mode were already chosen in
+    CreateCustomView. (Discord modals cannot contain dropdowns, hence two steps.)"""
 
     name = discord.ui.TextInput(label="Name", placeholder="Friday 5v5", max_length=64)
     fmt = discord.ui.TextInput(label="Format (BO1/BO3/BO5)", default="BO1", max_length=3)
@@ -133,9 +122,10 @@ class CreateCustomModal(discord.ui.Modal, title="Create custom"):
     start = discord.ui.TextInput(label="Start — HH:MM (server time) or ISO",
                                  placeholder="20:00")
 
-    def __init__(self, maps: list[str] | None = None):
+    def __init__(self, maps: list[str] | None = None, draft_mode: str = "snake"):
         super().__init__()
         self.maps = maps or []
+        self.draft_mode = draft_mode
 
     async def on_submit(self, itx: discord.Interaction):
         # Creating a custom writes to the DB and makes two REST calls (create
@@ -147,7 +137,7 @@ class CreateCustomModal(discord.ui.Modal, title="Create custom"):
             c = await actions.create_custom_flow(
                 itx, name=self.name.value, fmt=self.fmt.value,
                 start_raw=self.start.value, maps_csv=",".join(self.maps),
-                team_size=ts,
+                team_size=ts, draft_mode=self.draft_mode,
             )
         except (BotError, ValueError) as e:
             return await reply(itx, str(e))
@@ -157,39 +147,87 @@ class CreateCustomModal(discord.ui.Modal, title="Create custom"):
 
 
 class CreateCustomView(AutoDismissView):
-    """Step 1 of creation — pick the map pool from a dropdown, then Continue."""
+    """Step 1 of creation — map pool and draft mode from dropdowns, then Continue."""
 
-    def __init__(self, maps: list[Map]):
+    def __init__(self, maps: list[Map], competitive: list[str] | None = None):
         super().__init__(timeout=120)  # longer: the modal comes after this
         self.selected: list[str] = []
-        self.add_item(self._Pool(maps))
+        self.draft_mode = "snake"
+        self.competitive = competitive or []
+        self.pool = self._Pool(maps)
+        self.add_item(self.pool)
+        self.add_item(self._DraftMode())
 
     class _Pool(discord.ui.Select):
         def __init__(self, maps: list[Map]):
             opts = [discord.SelectOption(label=m.name, value=m.name) for m in maps[:25]]
             super().__init__(
                 placeholder="Map pool — pick 2+ maps (none = whole enabled pool)…",
-                options=opts, min_values=0, max_values=len(opts),
+                options=opts, min_values=0, max_values=len(opts), row=0,
             )
+
+        def sync(self, selected: list[str]) -> None:
+            """Keep the ticks in step with the view's selection — the
+            Competitive button changes it without touching the dropdown."""
+            for o in self.options:
+                o.default = o.value in selected
 
         async def callback(self, itx: discord.Interaction):
             self.view.selected = list(self.values)
-            # persist the ticks so the dropdown still shows the choice after re-render
-            for o in self.options:
-                o.default = o.value in self.view.selected
+            self.sync(self.view.selected)
             await itx.response.edit_message(
                 content=self.view.summary(), view=self.view
             )
 
+    class _DraftMode(discord.ui.Select):
+        def __init__(self):
+            super().__init__(
+                placeholder="Draft mode — snake (default) or one by one…",
+                options=[
+                    discord.SelectOption(
+                        label="Snake draft", value="snake", emoji="🐍",
+                        description="A, BB, AA, BB … — evens out the first-pick edge",
+                        default=True,
+                    ),
+                    discord.SelectOption(
+                        label="One by one", value="alternate", emoji="🔁",
+                        description="A, B, A, B … — strict alternating picks",
+                    ),
+                ],
+                row=1,
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            self.view.draft_mode = self.values[0]
+            for o in self.options:
+                o.default = o.value == self.view.draft_mode
+            await itx.response.edit_message(content=self.view.summary(), view=self.view)
+
     def summary(self) -> str:
         chosen = ", ".join(self.selected) if self.selected else "_all enabled maps_"
-        return f"**Map pool:** {chosen}\nThen hit **Continue** for the rest of the details."
+        return (
+            f"**Map pool:** {chosen}\n"
+            f"**Draft:** {draft_svc.DRAFT_MODE_LABEL[self.draft_mode]}\n"
+            "Then hit **Continue** for the rest of the details."
+        )
 
-    @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, emoji="➡️", row=1)
+    @discord.ui.button(label="Competitive pool", style=discord.ButtonStyle.primary,
+                       emoji="⭐", row=2)
+    async def use_competitive(self, itx: discord.Interaction, _b: discord.ui.Button):
+        if not self.competitive:
+            return await reply(
+                itx, "No competitive pool set yet — an admin can set it in "
+                     "**Maps → Competitive pool**."
+            )
+        self.selected = list(self.competitive)
+        self.pool.sync(self.selected)
+        await itx.response.edit_message(content=self.summary(), view=self)
+
+    @discord.ui.button(label="Continue", style=discord.ButtonStyle.success, emoji="➡️", row=2)
     async def go(self, itx: discord.Interaction, _b: discord.ui.Button):
         if self.selected and len(self.selected) < 2:
             return await reply(itx, "Pick at least 2 maps, or none to use the whole pool.")
-        await itx.response.send_modal(CreateCustomModal(self.selected))
+        await itx.response.send_modal(CreateCustomModal(self.selected, self.draft_mode))
 
 
 class AddMapModal(discord.ui.Modal, title="Add map"):
@@ -336,13 +374,14 @@ class _ManageCustomView(AutoDismissView):
 
         async def callback(self, itx: discord.Interaction):
             new = self.values[0]
-            async with SessionLocal() as s:
-                c = await s.get(Custom, self.cid)
-            if not c or not await can_manage_custom(c, itx.user):
-                return await reply(itx, "You can't manage this custom.")
-            await custom_svc.transfer(self.cid, new.id)
-            await audit.log(itx.guild_id, itx.user.id, "custom_transfer", str(self.cid), to=new.id)
-            await reply(itx, f"Ownership of #{self.cid} → {new.mention}")
+            # Redraws the registration embed and DMs the new owner — defer first.
+            await itx.response.defer(ephemeral=True)
+            try:
+                await actions.transfer_custom(itx, self.cid, new)
+            except BotError as e:
+                return await reply(itx, str(e))
+            await reply(itx, f"Ownership of #{self.cid} → {new.mention} "
+                             f"(they've been notified).")
 
     async def _start(self, itx: discord.Interaction, allow_partial: bool):
         try:
@@ -387,10 +426,11 @@ class _ManageCustomView(AutoDismissView):
 
 # ====================================================== sub-panel: maps =======
 class MapsAdminView(AutoDismissView):
-    """Multi-select: tick every map you want to flip, in one go."""
+    """Multi-select: tick every map you want to flip, in one go.
+    A second select holds the *competitive* pool — the rotation admins keep in
+    sync with Riot's, offered as one click when a custom is created."""
 
-    DEFAULT = ["Ascent", "Bind", "Haven", "Split", "Lotus",
-               "Sunset", "Icebox", "Abyss", "Pearl", "Fracture"]
+    DEFAULT = maps_svc.DEFAULT_POOL
 
     def __init__(self, guild_id: int, maps: list[Map]):
         super().__init__()
@@ -398,19 +438,25 @@ class MapsAdminView(AutoDismissView):
         self._sync(maps)
 
     def _sync(self, maps: list[Map]) -> None:
-        """Rebuild the toggle so its 🟢/🔴 labels match the DB."""
+        """Rebuild the selects so their 🟢/🔴/⭐ labels match the DB."""
         for item in list(self.children):
-            if isinstance(item, self._Toggle):
+            if isinstance(item, (self._Toggle, self._Competitive)):
                 self.remove_item(item)
         if maps:
             self.add_item(self._Toggle(maps))
+            self.add_item(self._Competitive(maps))
 
     @staticmethod
     def status_text(maps: list[Map]) -> str:
         if not maps:
             return "No maps configured — hit **Seed defaults**."
-        return "Map pool:\n" + "\n".join(
-            f"{'🟢' if m.enabled else '🔴'} {m.name}" for m in maps
+        comp = [m.name for m in maps if m.competitive]
+        body = "Map pool:\n" + "\n".join(
+            f"{'🟢' if m.enabled else '🔴'} {m.name}{' ⭐' if m.competitive else ''}"
+            for m in maps
+        )
+        return body + "\n\n⭐ **Competitive pool:** " + (
+            ", ".join(comp) if comp else "_not set_"
         )
 
     async def refresh(self, itx: discord.Interaction | None = None) -> None:
@@ -439,7 +485,7 @@ class MapsAdminView(AutoDismissView):
             ]
             super().__init__(
                 placeholder="Toggle maps on/off (pick as many as you like)…",
-                options=opts, min_values=1, max_values=len(opts),
+                options=opts, min_values=1, max_values=len(opts), row=0,
             )
 
         async def callback(self, itx: discord.Interaction):
@@ -455,20 +501,42 @@ class MapsAdminView(AutoDismissView):
             await self.view.refresh(itx)
             await reply(itx, "\n".join(flipped) if flipped else "Nothing to toggle.")
 
+    class _Competitive(discord.ui.Select):
+        """Sets the competitive pool to exactly what's ticked (empty clears it)."""
+
+        def __init__(self, maps: list[Map]):
+            opts = [
+                discord.SelectOption(
+                    label=m.name, value=m.name, emoji="⭐" if m.competitive else None,
+                    description="in the competitive pool" if m.competitive else None,
+                    default=m.competitive,
+                )
+                for m in maps[:25]
+            ]
+            super().__init__(
+                placeholder="⭐ Competitive pool — tick the current rotation…",
+                options=opts, min_values=0, max_values=len(opts), row=1,
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            in_pool, _ = await maps_svc.set_competitive(itx.guild_id, list(self.values))
+            await audit.log(itx.guild_id, itx.user.id, "maps_competitive",
+                            meta=",".join(in_pool))
+            await self.view.refresh(itx)
+            await reply(
+                itx,
+                f"⭐ Competitive pool: **{', '.join(in_pool)}** "
+                f"(enabled for play)." if in_pool else "Competitive pool cleared.",
+            )
+
     @discord.ui.button(label="Seed defaults", style=discord.ButtonStyle.primary,
-                       emoji="🌱", row=1)
+                       emoji="🌱", row=2)
     async def seed(self, itx: discord.Interaction, _b: discord.ui.Button):
-        added = []
-        async with SessionLocal() as s:
-            for name in self.DEFAULT:
-                if not await s.get(Map, (itx.guild_id, name)):
-                    s.add(Map(guild_id=itx.guild_id, name=name, enabled=True))
-                    added.append(name)
-            await s.commit()
+        added = await maps_svc.seed(itx.guild_id)
         await self.refresh(itx)
         await reply(itx, f"Seeded {len(added)} map(s)." if added else "Pool already seeded.")
 
-    @discord.ui.button(label="Add map", style=discord.ButtonStyle.success, emoji="➕", row=1)
+    @discord.ui.button(label="Add map", style=discord.ButtonStyle.success, emoji="➕", row=2)
     async def add(self, itx: discord.Interaction, _b: discord.ui.Button):
         await itx.response.send_modal(AddMapModal(self))
 
@@ -638,7 +706,7 @@ class AdminMenu(_LevelMenu):
         maps = await _enabled_maps(itx.guild_id)
         if not maps:
             return await reply(itx, "No enabled maps yet — use **Maps → Seed defaults** first.")
-        v = CreateCustomView(maps)
+        v = CreateCustomView(maps, await maps_svc.competitive_names(itx.guild_id))
         await spawn(itx, v, content=v.summary())
 
     @discord.ui.button(label="Maps", style=discord.ButtonStyle.secondary, emoji="🗺", row=0)

@@ -14,13 +14,133 @@ from bot.services import draft as draft_svc
 from bot.services import veto as veto_svc
 
 
+def other_side(side: str) -> str:
+    return "B" if side == "A" else "A"
+
+
+class CoinflipController:
+    """Heads/tails toss that decides who drafts first.
+
+    A random captain calls the coin; whoever wins the toss then chooses first or
+    second pick — so the toss decides a right, not the order itself.
+    """
+
+    FACES = ("heads", "tails")
+
+    def __init__(self, match_id: int, cap_a: int, cap_b: int):
+        self.match_id = match_id
+        self.cap_a, self.cap_b = cap_a, cap_b
+        self.caller_side = random.choice(("A", "B"))
+        self.call: str | None = None          # heads|tails
+        self.face: str | None = None          # what the coin landed on
+        self.winner_side: str | None = None
+        self.first_side: str | None = None    # who picks first in the draft
+        self.auto = False                     # any step decided by the timer
+
+    # ------------------------------------------------------------- helpers ---
+    def captain(self, side: str) -> int:
+        return self.cap_a if side == "A" else self.cap_b
+
+    @property
+    def caller_id(self) -> int:
+        return self.captain(self.caller_side)
+
+    @property
+    def stage(self) -> str:
+        if self.call is None:
+            return "call"
+        if self.first_side is None:
+            return "order"
+        return "done"
+
+    @property
+    def done(self) -> bool:
+        return self.stage == "done"
+
+    def actor_id(self) -> int | None:
+        """Whoever the flow is waiting on right now."""
+        if self.stage == "call":
+            return self.caller_id
+        if self.stage == "order":
+            return self.captain(self.winner_side)
+        return None
+
+    # -------------------------------------------------------------- actions ---
+    def flip(self, call: str, auto: bool = False) -> str:
+        """Record the call, flip, and set the toss winner. Returns the face."""
+        self.call = call
+        self.face = random.choice(self.FACES)
+        self.winner_side = (
+            self.caller_side if self.call == self.face else other_side(self.caller_side)
+        )
+        self.auto = self.auto or auto
+        return self.face
+
+    def choose_order(self, choice: str, auto: bool = False) -> str:
+        """`first` or `second` — sets which side opens the draft."""
+        self.first_side = (
+            self.winner_side if choice == "first" else other_side(self.winner_side)
+        )
+        self.auto = self.auto or auto
+        return self.first_side
+
+    def random_call(self) -> str:
+        return random.choice(self.FACES)
+
+    def random_order(self) -> str:
+        return random.choice(("first", "second"))
+
+    # ---------------------------------------------------------------- embed ---
+    def embed(self) -> discord.Embed:
+        e = discord.Embed(title=f"🪙 Coin Toss — Match #{self.match_id}", color=VAL_RED)
+        e.add_field(
+            name="Calling",
+            value=f"<@{self.caller_id}> ({self.caller_side})",
+            inline=True,
+        )
+        if self.call:
+            e.add_field(name="Call", value=self.call.title(), inline=True)
+            e.add_field(name="Landed", value=f"**{self.face.title()}**", inline=True)
+            e.add_field(
+                name="Toss winner",
+                value=f"<@{self.captain(self.winner_side)}> ({self.winner_side})",
+                inline=False,
+            )
+        if self.stage == "call":
+            e.add_field(name="Waiting on", value="heads or tails", inline=False)
+        elif self.stage == "order":
+            e.add_field(
+                name="Waiting on",
+                value=f"<@{self.captain(self.winner_side)}> — **first** or **second** pick",
+                inline=False,
+            )
+        else:
+            e.add_field(
+                name="Draft order",
+                value=f"<@{self.captain(self.first_side)}> ({self.first_side}) picks first"
+                      + (" _(auto)_" if self.auto else ""),
+                inline=False,
+            )
+        return e
+
+
 class DraftController:
-    def __init__(self, match_id: int, cap_a: int, cap_b: int, pool: list[int]):
+    def __init__(
+        self,
+        match_id: int,
+        cap_a: int,
+        cap_b: int,
+        pool: list[int],
+        mode: str = "snake",
+        first: str = "A",
+    ):
         self.match_id = match_id
         self.cap_a, self.cap_b = cap_a, cap_b
         self.pool = list(pool)                      # selectable players
         self.team = {"A": [cap_a], "B": [cap_b]}
-        self.order = draft_svc.snake_order(len(self.pool))
+        self.mode = mode if mode in draft_svc.DRAFT_MODES else "snake"
+        self.first = first
+        self.order = draft_svc.pick_order(self.mode, len(self.pool), first)
         self.idx = 0
 
     @property
@@ -75,7 +195,8 @@ class DraftController:
             await s.commit()
 
     def embed(self) -> discord.Embed:
-        e = discord.Embed(title=f"🐍 Snake Draft — Match #{self.match_id}", color=VAL_RED)
+        title = "🐍 Snake Draft" if self.mode == "snake" else "🔁 Draft (one by one)"
+        e = discord.Embed(title=f"{title} — Match #{self.match_id}", color=VAL_RED)
         e.add_field(name="🟥 Team A", value="\n".join(f"<@{u}>" for u in self.team["A"]), inline=True)
         e.add_field(name="🟦 Team B", value="\n".join(f"<@{u}>" for u in self.team["B"]), inline=True)
         if not self.done:
@@ -96,6 +217,7 @@ class VetoController:
         self.plan = veto_svc.veto_plan(fmt, len(pool))
         self.step = 0
         self.picked_maps: list[str] = []
+        self.history: list[tuple[str, str | None, str]] = []  # (action, side, map)
 
     @property
     def _current(self):
@@ -139,6 +261,26 @@ class VetoController:
     def _record(self, action: str, side: str | None, map_name: str) -> None:
         self._pending = getattr(self, "_pending", [])
         self._pending.append((self.step, action, side, map_name))
+        self.history.append((action, side, map_name))
+
+    @property
+    def decider_map(self) -> str | None:
+        """The map the veto ends on — the one sides get chosen for."""
+        return self.picked_maps[-1] if self.picked_maps else None
+
+    @property
+    def side_choice_side(self) -> str | None:
+        """Team that picks attack/defence: the one that did NOT ban last.
+
+        Falls back to the last team to act at all — a short BO3 pool can be all
+        picks and no bans, and someone still has to choose a side."""
+        for action, side, _ in reversed(self.history):
+            if action == "ban" and side:
+                return other_side(side)
+        for _action, side, _ in reversed(self.history):
+            if side:
+                return other_side(side)
+        return None
 
     async def persist(self) -> None:
         async with SessionLocal() as s:

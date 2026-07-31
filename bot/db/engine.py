@@ -31,9 +31,54 @@ def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
     cur.close()
 
 
+def _literal_default(col) -> str | None:  # noqa: ANN001
+    """SQL literal for a column's Python-side default, or None if it has none.
+
+    Only scalars are usable in `ALTER TABLE ... ADD COLUMN`; callables (e.g.
+    `_utcnow`) are skipped — the column is simply added nullable/empty.
+    """
+    d = getattr(col, "default", None)
+    if d is None or getattr(d, "is_callable", False):
+        return None
+    arg = getattr(d, "arg", None)
+    if isinstance(arg, bool):
+        return "1" if arg else "0"
+    if isinstance(arg, (int, float)):
+        return str(arg)
+    if isinstance(arg, str):
+        escaped = arg.replace("'", "''")
+        return f"'{escaped}'"
+    return None
+
+
+async def _add_missing_columns(conn) -> None:  # noqa: ANN001
+    """Poor-man's migration: add columns the models gained since the DB was made.
+
+    `create_all` only creates missing *tables*, so a bot upgraded in place would
+    otherwise crash on every new column. SQLite's ADD COLUMN is cheap and
+    non-destructive; existing rows get the column default (or NULL).
+    """
+    for table in Base.metadata.sorted_tables:
+        rows = await conn.execute(text(f"PRAGMA table_info('{table.name}')"))
+        existing = {r[1] for r in rows}
+        if not existing:      # table didn't exist -> create_all just made it
+            continue
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} " \
+                  f"{col.type.compile(engine.dialect)}"
+            default = _literal_default(col)
+            if default is not None:
+                ddl += f" DEFAULT {default}"
+            await conn.execute(text(ddl))
+
+
 async def init_db() -> None:
-    """Create tables on first boot. (Use Alembic in production.)"""
+    """Create tables on first boot, then patch in any new columns.
+    (Use Alembic in production.)"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _add_missing_columns(conn)
         # ensure pragmas applied on this connection too
         await conn.execute(text("PRAGMA journal_mode=WAL"))

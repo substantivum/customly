@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from bot.db.models import Custom
+from bot.services.draft import DRAFT_MODE_LABEL
 
 VAL_RED = discord.Color.from_str("#ff4655")
 
@@ -27,13 +28,15 @@ def custom_registration_embed(custom: Custom, registered: list[int], size: int) 
     pool = ", ".join(json.loads(custom.map_pool))
     start = as_utc(custom.start_time)
     end = start + timedelta(hours=custom.duration_h)
+    draft = DRAFT_MODE_LABEL.get(custom.draft_mode or "snake", custom.draft_mode)
     e = discord.Embed(
         title=f"🎮 Custom #{custom.custom_id} — {custom.name}",
         description=(
             f"**Format:** {custom.format}  ·  **{custom.team_size}v{custom.team_size}**\n"
             f"**Starts:** {ts(start, 'F')}  ({ts(start, 'R')})\n"
             f"**Block:** {ts(start, 't')} – {ts(end, 't')}\n"
-            f"**Map pool:** {pool}"
+            f"**Map pool:** {pool}\n"
+            f"**Draft:** {draft}"
         ),
         color=VAL_RED,
     )

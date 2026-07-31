@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import random
 
 import discord
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core.embeds import custom_registration_embed
+from bot.core.embeds import VAL_RED, custom_registration_embed
 from bot.core.errors import BotError
 from bot.services import custom as custom_svc
 
@@ -201,28 +202,24 @@ def lobby_view(custom_id: int) -> discord.ui.View:
     return v
 
 
-class VetoView(discord.ui.View):
-    """One button per remaining map; the active side bans/picks on their turn.
-    A per-turn timer auto-picks a random remaining map if the captain stalls."""
+class _TimedView(discord.ui.View):
+    """Base for the run-of-match views: one message, one per-turn timer.
 
-    def __init__(self, controller: "VetoController"):
-        super().__init__(timeout=None)  # we run our own per-turn timer
-        self.c = controller
+    Discord's own view timeout can't be used — it fires once and can't be reset
+    per turn — so each of these runs an asyncio timer it re-arms after every
+    step, and auto-decides for whoever is stalling."""
+
+    SECONDS = 30
+
+    def __init__(self):
+        super().__init__(timeout=None)
         self.message = None
         self.channel = None
-        self.on_done = None  # async callback fired once veto completes
         self._timer = None
-        self._render()
-
-    def _render(self):
-        self.clear_items()
-        for m in self.c.remaining:
-            self.add_item(self._MapButton(m))
 
     def arm(self):
         self._cancel()
-        if not self.c.done:
-            self._timer = asyncio.create_task(self._countdown())
+        self._timer = asyncio.create_task(self._countdown())
 
     def _cancel(self):
         if self._timer and not self._timer.done():
@@ -230,9 +227,157 @@ class VetoView(discord.ui.View):
 
     async def _countdown(self):
         try:
-            await asyncio.sleep(settings.veto_pick_seconds)
+            await asyncio.sleep(self.SECONDS)
         except asyncio.CancelledError:
             return
+        await self.on_timeout_step()
+
+    async def on_timeout_step(self):    # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def _redraw(self, embed, *, itx, view):
+        if itx is not None and not itx.response.is_done():
+            await itx.response.edit_message(embed=embed, view=view)
+        elif self.message:
+            try:
+                await self.message.edit(embed=embed, view=view)
+            except discord.HTTPException:
+                pass
+
+
+class CoinflipView(_TimedView):
+    """Heads/tails, then first-or-second pick. Only the captain on the clock can
+    click; the timer decides for them if they don't."""
+
+    def __init__(self, controller, on_done):
+        super().__init__()
+        self.c = controller
+        self.on_done = on_done          # async (first_side: str) -> None
+        self.SECONDS = settings.draft_pick_seconds
+        self._render()
+
+    def _render(self):
+        self.clear_items()
+        if self.c.stage == "call":
+            self.add_item(self._Choice("Heads", "heads", "🪙"))
+            self.add_item(self._Choice("Tails", "tails", "🌙"))
+        elif self.c.stage == "order":
+            self.add_item(self._Choice("First pick", "first", "1️⃣"))
+            self.add_item(self._Choice("Second pick", "second", "2️⃣"))
+
+    async def _apply(self, value: str, *, itx, auto: bool):
+        if self.c.stage == "call":
+            self.c.flip(value, auto=auto)
+        elif self.c.stage == "order":
+            self.c.choose_order(value, auto=auto)
+        self._render()
+        done = self.c.done
+        await self._redraw(self.c.embed(), itx=itx, view=None if done else self)
+        if done:
+            self._cancel()
+            self.stop()
+            await self.on_done(self.c.first_side)
+        else:
+            self.arm()
+
+    async def on_timeout_step(self):
+        if self.c.done:
+            return
+        value = self.c.random_call() if self.c.stage == "call" else self.c.random_order()
+        await self._apply(value, itx=None, auto=True)
+
+    class _Choice(discord.ui.Button):
+        def __init__(self, label: str, value: str, emoji: str):
+            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
+            self.value = value
+
+        async def callback(self, itx: discord.Interaction):
+            view: "CoinflipView" = self.view     # capture before _render detaches us
+            if itx.user.id != view.c.actor_id():
+                return await itx.response.send_message(
+                    "Not your call.", ephemeral=True
+                )
+            await view._apply(self.value, itx=itx, auto=False)
+
+
+class SidePickView(_TimedView):
+    """Attack or defence on the decider map, for the team that didn't ban it
+    away. Auto-picks at random if that captain stalls."""
+
+    def __init__(self, match_id: int, side: str, captain_id: int,
+                 map_name: str | None, on_done):
+        super().__init__()
+        self.match_id = match_id
+        self.side = side
+        self.captain_id = captain_id
+        self.map_name = map_name
+        self.on_done = on_done          # async (choice: str, auto: bool) -> None
+        self.choice: str | None = None
+        self.SECONDS = settings.veto_pick_seconds
+        self.add_item(self._Choice("Attack", "attack", "🔫"))
+        self.add_item(self._Choice("Defence", "defence", "🛡"))
+
+    def embed(self) -> discord.Embed:
+        e = discord.Embed(title=f"🎯 Side Choice — Match #{self.match_id}", color=VAL_RED)
+        e.add_field(name="Map", value=self.map_name or "—", inline=True)
+        if self.choice:
+            e.add_field(
+                name="Chosen",
+                value=f"Team {self.side} starts **{self.choice.title()}**",
+                inline=False,
+            )
+        else:
+            e.add_field(
+                name="Waiting on",
+                value=f"<@{self.captain_id}> (Team {self.side}) — they didn't ban last, "
+                      f"so they pick the side",
+                inline=False,
+            )
+        return e
+
+    async def _apply(self, choice: str, *, itx, auto: bool):
+        self.choice = choice
+        self._cancel()
+        self.stop()
+        await self._redraw(self.embed(), itx=itx, view=None)
+        await self.on_done(choice, auto)
+
+    async def on_timeout_step(self):
+        if self.choice:
+            return
+        await self._apply(random.choice(("attack", "defence")), itx=None, auto=True)
+
+    class _Choice(discord.ui.Button):
+        def __init__(self, label: str, value: str, emoji: str):
+            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
+            self.value = value
+
+        async def callback(self, itx: discord.Interaction):
+            view: "SidePickView" = self.view
+            if itx.user.id != view.captain_id:
+                return await itx.response.send_message(
+                    "Only the team that didn't ban last picks the side.", ephemeral=True
+                )
+            await view._apply(self.value, itx=itx, auto=False)
+
+
+class VetoView(_TimedView):
+    """One button per remaining map; the active side bans/picks on their turn.
+    A per-turn timer auto-picks a random remaining map if the captain stalls."""
+
+    def __init__(self, controller: "VetoController"):
+        super().__init__()
+        self.c = controller
+        self.on_done = None  # async callback fired once veto completes
+        self.SECONDS = settings.veto_pick_seconds
+        self._render()
+
+    def _render(self):
+        self.clear_items()
+        for m in self.c.remaining:
+            self.add_item(self._MapButton(m))
+
+    async def on_timeout_step(self):
         if self.c.done:
             return
         done = self.c.auto_pick_map()
@@ -240,14 +385,7 @@ class VetoView(discord.ui.View):
         await self._update(done, itx=None, auto=True)
 
     async def _update(self, done: bool, *, itx, auto: bool):
-        new_view = None if done else self
-        if itx is not None and not itx.response.is_done():
-            await itx.response.edit_message(embed=self.c.embed(), view=new_view)
-        elif self.message:
-            try:
-                await self.message.edit(embed=self.c.embed(), view=new_view)
-            except discord.HTTPException:
-                pass
+        await self._redraw(self.c.embed(), itx=itx, view=None if done else self)
         if done:
             self._cancel()
             await self.c.persist()
@@ -278,18 +416,16 @@ class VetoView(discord.ui.View):
             await view._update(done, itx=itx, auto=False)
 
 
-class DraftView(discord.ui.View):
+class DraftView(_TimedView):
     """Captain on the clock picks from a Select of remaining players.
     A per-turn timer auto-picks a random player if the captain stalls."""
 
     def __init__(self, controller, on_done, guild: discord.Guild | None = None):
-        super().__init__(timeout=None)
+        super().__init__()
         self.c = controller
         self.on_done = on_done
         self.guild = guild
-        self.message = None
-        self.channel = None
-        self._timer = None
+        self.SECONDS = settings.draft_pick_seconds
         self._render()
 
     def _label(self, uid: int) -> str:
@@ -306,20 +442,7 @@ class DraftView(discord.ui.View):
         ]
         self.add_item(self._PlayerSelect(opts))
 
-    def arm(self):
-        self._cancel()
-        if not self.c.done:
-            self._timer = asyncio.create_task(self._countdown())
-
-    def _cancel(self):
-        if self._timer and not self._timer.done():
-            self._timer.cancel()
-
-    async def _countdown(self):
-        try:
-            await asyncio.sleep(settings.draft_pick_seconds)
-        except asyncio.CancelledError:
-            return
+    async def on_timeout_step(self):
         if self.c.done:
             return
         done = await self.c.pick(self.c.autopick(), auto=True)
@@ -327,14 +450,7 @@ class DraftView(discord.ui.View):
         await self._advance(done, itx=None)
 
     async def _advance(self, done: bool, *, itx):
-        new_view = None if done else self
-        if itx is not None and not itx.response.is_done():
-            await itx.response.edit_message(embed=self.c.embed(), view=new_view)
-        elif self.message:
-            try:
-                await self.message.edit(embed=self.c.embed(), view=new_view)
-            except discord.HTTPException:
-                pass
+        await self._redraw(self.c.embed(), itx=itx, view=None if done else self)
         if done:
             self._cancel()
             await self.c.persist_teams()

@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 import pytest
 
 from bot.core.actions import channel_slug, parse_start
+from bot.core.naming import team_vc_name
 from bot.services.custom import _overlaps
-from bot.services.draft import snake_order
+from bot.services.draft import alternate_order, pick_order, snake_order
 from bot.services.veto import MIN_POOL, veto_plan
 
 
@@ -25,6 +26,34 @@ def test_overlap_false_adjacent():
 
 def test_snake_order():
     assert snake_order(8) == ["A", "B", "B", "A", "A", "B", "B", "A"]
+
+
+def test_snake_order_follows_the_coin_toss():
+    """The toss winner may take second pick — the whole order mirrors."""
+    assert snake_order(8, "B") == ["B", "A", "A", "B", "B", "A", "A", "B"]
+
+
+def test_alternate_order():
+    assert alternate_order(6) == ["A", "B", "A", "B", "A", "B"]
+    assert alternate_order(6, "B") == ["B", "A", "B", "A", "B", "A"]
+
+
+@pytest.mark.parametrize("mode", ["snake", "alternate"])
+@pytest.mark.parametrize("first", ["A", "B"])
+@pytest.mark.parametrize("picks", [2, 4, 6, 8])
+def test_every_draft_mode_splits_the_pool_evenly(mode, first, picks):
+    """Teams are the same size whichever mode/first pick is in play — a queue is
+    always an even number of players, so the non-captain pool is even too."""
+    order = pick_order(mode, picks, first)
+    assert order[0] == first
+    assert order.count("A") == order.count("B") == picks // 2
+
+
+def test_pick_order_rejects_unknown_mode():
+    from bot.core.errors import BotError
+
+    with pytest.raises(BotError):
+        pick_order("auction", 4)
 
 
 def test_veto_bo1_alternates_to_one():
@@ -103,6 +132,74 @@ def test_channel_slug_always_valid():
     assert 0 < len(slug) <= 90
     assert not slug.startswith("-") and not slug.endswith("-")
     assert "--" not in slug
+
+
+# ----------------------------------------------------------- team vc names ---
+@pytest.mark.parametrize(
+    "custom_name,side,nick,expected",
+    [
+        ("Friday 5v5", "a", "Salta", "friday-5v5-a-salta"),
+        ("Friday 5v5", "B", "Nex", "friday-5v5-b-nex"),
+        ("Пятничка 5в5", "b", "Салта", "пятничка-5в5-b-салта"),
+        ("Friday 5v5", "b", None, "friday-5v5-b"),   # captain left the server
+        ("🔥", "a", "🎮", "team-a"),                  # nothing sluggable
+    ],
+)
+def test_team_vc_name(custom_name, side, nick, expected):
+    assert team_vc_name(custom_name, side, nick) == expected
+
+
+def test_team_vc_name_always_valid():
+    name = team_vc_name("X" * 80, "a", "Y" * 80)
+    assert 0 < len(name) <= 95
+    assert not name.startswith("-") and not name.endswith("-")
+
+
+# ------------------------------------------------------------- coin toss -----
+def test_coinflip_winner_is_whoever_called_right():
+    from bot.core.controllers import CoinflipController
+
+    for _ in range(200):
+        c = CoinflipController(1, 111, 222)
+        assert c.caller_side in ("A", "B")
+        assert c.actor_id() == c.caller_id
+        face = c.flip("heads")
+        called_right = face == "heads"
+        assert (c.winner_side == c.caller_side) is called_right
+        # the toss winner is the one who now chooses first/second pick
+        assert c.actor_id() == c.captain(c.winner_side)
+
+
+@pytest.mark.parametrize("choice", ["first", "second"])
+def test_coinflip_order_choice(choice):
+    from bot.core.controllers import CoinflipController
+
+    c = CoinflipController(1, 111, 222)
+    c.flip("tails")
+    first = c.choose_order(choice)
+    assert (first == c.winner_side) is (choice == "first")
+    assert c.done and c.first_side == first
+
+
+# --------------------------------------------------------- side selection ----
+def _drive_veto(fmt: str, pool_size: int):
+    """Run a whole veto by always taking the first remaining map."""
+    from bot.core.controllers import VetoController
+
+    ctl = VetoController(7, fmt, [f"m{i}" for i in range(pool_size)], 111, 222)
+    while not ctl.done:
+        ctl.apply(ctl.remaining[0])
+    return ctl
+
+
+@pytest.mark.parametrize("fmt,pool_size", [("BO1", 7), ("BO1", 2), ("BO3", 7), ("BO5", 9)])
+def test_side_choice_goes_to_the_team_that_did_not_ban_last(fmt, pool_size):
+    ctl = _drive_veto(fmt, pool_size)
+    bans = [(side) for action, side, _ in ctl.history if action == "ban" and side]
+    assert ctl.decider_map == ctl.picked_maps[-1]
+    if bans:
+        assert ctl.side_choice_side != bans[-1]
+    assert ctl.side_choice_side in ("A", "B")
 
 
 # -------------------------------------------------------------- start times ---

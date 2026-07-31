@@ -53,11 +53,42 @@ def choose_captains(
     raise BotError(f"Unknown captain method: {method}")
 
 
-def snake_order(picks_needed: int) -> list[str]:
-    """Snake draft sides for the remaining (non-captain) players: A, BB, AA, BB ..."""
-    seq = ["A"]
-    side, run = "B", 2
+def _other(side: str) -> str:
+    return "B" if side == "A" else "A"
+
+
+def snake_order(picks_needed: int, first: str = "A") -> list[str]:
+    """Snake draft sides for the remaining (non-captain) players: A, BB, AA, BB …
+
+    `first` is the side that won the right to pick first in the coin toss.
+    """
+    seq = [first]
+    side, run = _other(first), 2
     while len(seq) < picks_needed:
         seq.extend([side] * run)
-        side = "A" if side == "B" else "B"
+        side = _other(side)
     return seq[:picks_needed]
+
+
+def alternate_order(picks_needed: int, first: str = "A") -> list[str]:
+    """Straight one-by-one draft: A, B, A, B … — no double picks.
+
+    The first pick is worth more here than in a snake, which is exactly why some
+    organisers prefer it: the coin toss decides something real.
+    """
+    return [first if i % 2 == 0 else _other(first) for i in range(picks_needed)]
+
+
+DRAFT_MODES = ("snake", "alternate")
+DRAFT_MODE_LABEL = {
+    "snake": "🐍 Snake (A, BB, AA, …)",
+    "alternate": "🔁 One by one (A, B, A, B, …)",
+}
+
+
+def pick_order(mode: str, picks_needed: int, first: str = "A") -> list[str]:
+    """Draft turn order for `mode` (`snake` | `alternate`)."""
+    if mode not in DRAFT_MODES:
+        raise BotError(f"Draft mode must be one of: {', '.join(DRAFT_MODES)}.")
+    fn = alternate_order if mode == "alternate" else snake_order
+    return fn(picks_needed, first)

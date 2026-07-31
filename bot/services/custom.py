@@ -10,7 +10,10 @@ from sqlalchemy import delete, select
 
 from bot.core.errors import Blocked, BotError, Conflict, NotFound
 from bot.db import SessionLocal
+from bot.services import draft as draft_svc
+from bot.services import maps as maps_svc
 from bot.services import veto as veto_svc
+from bot.services import voice
 from bot.services.bans import is_banned as _is_banned
 from bot.db.models import (
     Custom,
@@ -37,12 +40,17 @@ async def create_custom(
     vc_category: int | None,
     config_chan: int | None,
     team_size: int = 5,
+    draft_mode: str = "snake",
 ) -> Custom:
     fmt = fmt.upper()
     if fmt not in DURATION:
         raise BotError("Format must be BO1, BO3 or BO5.")
     if not (MIN_TEAM <= team_size <= MAX_TEAM):
         raise BotError("Team size must be between 1 and 5 (1v1 to 5v5).")
+    if draft_mode not in draft_svc.DRAFT_MODES:
+        raise BotError(
+            f"Draft mode must be one of: {', '.join(draft_svc.DRAFT_MODES)}."
+        )
     async with SessionLocal() as s:
         # current enabled pool (preserve original case for fallback)
         rows = await s.execute(
@@ -51,6 +59,14 @@ async def create_custom(
         enabled_names = [r[0] for r in rows.all()]
         enabled = {n.lower() for n in enabled_names}
         chosen = [m.strip() for m in maps if m.strip()]
+        if len(chosen) == 1 and chosen[0].lower() in maps_svc.COMPETITIVE_TOKENS:
+            # "competitive" as the whole map list means the guild's current pool
+            chosen = await maps_svc.competitive_names(guild_id)
+            if not chosen:
+                raise BotError(
+                    "No competitive pool set for this server yet — an admin can "
+                    "set it in **Admin panel → Maps → Competitive pool**."
+                )
         if not chosen:
             # No maps given → use the whole enabled (seeded) pool.
             if not enabled_names:
@@ -76,6 +92,7 @@ async def create_custom(
             duration_h=DURATION[fmt],
             team_size=team_size,
             map_pool=json.dumps(chosen),
+            draft_mode=draft_mode,
             start_time=start_time,
             vc_category=vc_category,
             config_chan=config_chan,
@@ -200,20 +217,15 @@ async def transfer(custom_id: int, new_owner: int) -> Custom:
 # ---------------------------------------------------- deletion / guard ------
 def is_in_progress(custom: Custom, guild: discord.Guild) -> bool:
     """Both team VCs populated ⇒ a game is live ⇒ protect from teardown."""
-    a = discord.utils.get(guild.voice_channels, name=f"team_a_{custom.custom_id}")
-    b = discord.utils.get(guild.voice_channels, name=f"team_b_{custom.custom_id}")
+    a, b = voice.team_vcs(guild, custom)
     return bool(a and b and len(a.members) > 0 and len(b.members) > 0)
 
 
 async def _purge_channels(custom: Custom, guild: discord.Guild, force: bool) -> None:
-    targets = []
-    for vc in guild.voice_channels:
-        if vc.name in (
-            f"team_a_{custom.custom_id}",
-            f"team_b_{custom.custom_id}",
-            f"staging_{custom.custom_id}",
-        ):
-            targets.append(vc)
+    staging = discord.utils.get(
+        guild.voice_channels, name=f"staging_{custom.custom_id}"
+    )
+    targets = [vc for vc in (*voice.team_vcs(guild, custom), staging) if vc]
     if custom.reg_channel:
         ch = guild.get_channel(custom.reg_channel)
         if ch:
