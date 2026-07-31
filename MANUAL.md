@@ -54,8 +54,8 @@ owner (or anyone with Administrator) is treated as **SuperAdmin** automatically.
 | `DISCORD_TOKEN` | yes | Bot token |
 | `DB_PATH` | yes | SQLite file path (keep on the mounted volume, e.g. `/app/data/bot.db`) |
 | `GUILD_ID` | no | Sync commands to one server instantly (use during testing) |
-| `ADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **admin** |
-| `SUPERADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **superadmin** |
+| `ADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **admin**, and may talk in every custom's channel |
+| `SUPERADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **superadmin**, and may talk in every custom's channel |
 | `TZ_OFFSET` | no | Server-local UTC offset for `HH:MM` start times (default 0). `6` = UTC+6 |
 | `CUSTOMS_CATEGORY_ID` | no | Category where the custom's text channel and team VCs are created |
 | `CUSTOM_CONFIG_CHANNEL` | no | Restricts `/custom create` to this channel |
@@ -209,9 +209,11 @@ of inactivity.
   **one by one** (A, B, A, B, …). Shown on the registration embed.
 
 The bot creates a dedicated `#<your-name>-<custom-name>` text channel with a registration embed
-(Register / Leave buttons). The channel is **read-only**: everyone can see it and use
-the Register/Leave buttons, but **only the bot and (later) the two captains can type**
-in it. The whole match flow — captain announcement, snake draft, the map ban/pick
+(Register / Leave buttons). The channel is **read-only** for the room: everyone can
+see it and use the Register/Leave buttons, but only the bot, **anyone with the
+`ADMIN_ROLE` / `SUPERADMIN_ROLE` Discord role**, the custom's **owner** (including a
+new owner after a transfer) and — once the match starts — the **two captains** can
+type in it. The whole match flow — captain announcement, snake draft, the map ban/pick
 veto, and the final lobby — all happens **in this channel**, not in `#custom-config`.
 Start time renders as a Discord timestamp, localized for every viewer.
 

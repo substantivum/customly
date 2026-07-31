@@ -75,6 +75,32 @@ def parse_start(raw: str, tz_offset: int | None = None) -> datetime:
 # tests) that have always imported it from actions.
 __all__ = ["channel_slug"]
 
+# The custom channel is read-only for the room; these are the people who run it.
+WRITE = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
+
+def staff_overwrites(guild: discord.Guild) -> dict:
+    """Write access for the configured staff roles (`ADMIN_ROLE` /
+    `SUPERADMIN_ROLE`), so organisers can talk in any custom's channel."""
+    out = {}
+    for role_id in (settings.admin_role, settings.superadmin_role):
+        role = guild.get_role(role_id) if role_id else None
+        if role:
+            out[role] = WRITE
+    return out
+
+
+async def allow_write(channel, target, reason: str) -> None:
+    """Let one member type in a custom's (otherwise read-only) channel."""
+    if not isinstance(channel, discord.TextChannel) or target is None:
+        return
+    try:
+        await channel.set_permissions(
+            target, view_channel=True, send_messages=True, reason=reason
+        )
+    except discord.HTTPException:
+        pass
+
 
 async def create_custom_flow(
     itx: discord.Interaction,
@@ -105,7 +131,8 @@ async def create_custom_flow(
         if settings.customs_category_id else None
     )
     # Everyone can see the channel and use the Register/Leave buttons (button clicks
-    # don't need Send Messages), but only the bot — and later the captains — may type.
+    # don't need Send Messages), but only the bot, the staff roles, the owner —
+    # and later the two captains — may type.
     overwrites = {
         itx.guild.default_role: discord.PermissionOverwrite(
             view_channel=True, send_messages=False, add_reactions=False
@@ -114,6 +141,11 @@ async def create_custom_flow(
             view_channel=True, send_messages=True, manage_channels=True
         ),
     }
+    overwrites.update(staff_overwrites(itx.guild))
+    if isinstance(itx.user, discord.Member):
+        # The owner runs the custom, so they can always type in it — even if their
+        # admin level is a bot-side grant rather than one of the Discord roles.
+        overwrites[itx.user] = WRITE
     reg = await itx.guild.create_text_channel(
         channel_slug(itx.user.display_name, name),
         category=category if isinstance(category, discord.CategoryChannel) else None,
@@ -210,6 +242,8 @@ async def transfer_custom(
     await refresh_registration_embed(itx.guild, custom_id)
 
     chan = itx.guild.get_channel(c.reg_channel) if c.reg_channel else None
+    # The new owner runs the custom now, so let them talk in its channel.
+    await allow_write(chan, new_owner, reason=f"custom {custom_id} owner")
     note = (f"👑 Ownership of **Custom #{custom_id} — {c.name}** transferred to "
             f"{new_owner.mention} by {itx.user.mention}.")
     if isinstance(chan, discord.TextChannel):
@@ -484,14 +518,10 @@ async def start_match(
     # custom's own channel.
     channel = guild.get_channel(c.reg_channel) if c.reg_channel else itx.channel
 
-    # Let the two captains type in the custom channel; everyone else stays read-only.
+    # Let the two captains type in the custom channel; everyone else stays read-only
+    # (admins and the owner already got write access when the channel was made).
     for cap_id in (cap_a, cap_b):
-        m = guild.get_member(cap_id)
-        if m and isinstance(channel, discord.TextChannel):
-            try:
-                await channel.set_permissions(m, send_messages=True, reason="captain")
-            except discord.HTTPException:
-                pass
+        await allow_write(channel, guild.get_member(cap_id), reason="captain")
 
     await itx.followup.send(
         f"Match #{match_id} starting ({per_side}v{per_side}) in {channel.mention}. "
