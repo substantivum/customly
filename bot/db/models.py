@@ -95,6 +95,9 @@ class Custom(Base):
     # the start button shouldn't be where you decide how the game is run.
     captain_method: Mapped[str] = mapped_column(String(16), default="random")
     start_time: Mapped[datetime] = mapped_column()           # ISO, overlap checks
+    # Created without a time: `start_time` is the creation instant so the overlap
+    # rule still works, but everything user-facing says "ASAP" instead of a clock.
+    start_asap: Mapped[bool] = mapped_column(Boolean, default=False)
     vc_category: Mapped[int | None] = mapped_column(Integer)
     reg_channel: Mapped[int | None] = mapped_column(Integer)  # #custom-<id>
     reg_message: Mapped[int | None] = mapped_column(Integer)  # registration embed

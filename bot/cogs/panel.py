@@ -30,7 +30,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.core import actions, audit, board
-from bot.core.embeds import VAL_RED, custom_registration_embed, ts
+from bot.core.embeds import VAL_RED, custom_registration_embed, start_line
 from bot.core.errors import BotError
 from bot.core.nav import Screen
 from bot.core.permissions import (
@@ -96,8 +96,11 @@ class CreateCustomModal(discord.ui.Modal, title="Create custom"):
     name = discord.ui.TextInput(label="Name", placeholder="Friday 5v5", max_length=64)
     fmt = discord.ui.TextInput(label="Format (BO1/BO3/BO5)", default="BO1", max_length=3)
     team_size = discord.ui.TextInput(label="Team size (1-5)", default="5", max_length=1)
-    start = discord.ui.TextInput(label="Start — HH:MM (server time) or ISO",
-                                 placeholder="20:00")
+    start = discord.ui.TextInput(
+        label="Start — blank = ASAP",
+        placeholder="20:00 (server time) or ISO — leave empty to play now",
+        required=False,
+    )
 
     def __init__(self, maps: list[str] | None = None, draft_mode: str = "snake",
                  captain_method: str = "random"):
@@ -512,7 +515,7 @@ class ManageScreen(_Gated):
             description=(
                 f"{board.STATE_EMOJI.get(c.state, '•')} **{c.state}**  ·  "
                 f"{c.format}  ·  **{c.team_size}v{c.team_size}**\n"
-                f"**Starts:** {ts(c.start_time, 'F')} ({ts(c.start_time, 'R')})\n"
+                f"**Starts:** {start_line(c)}\n"
                 f"**Map pool:** {', '.join(json.loads(c.map_pool))}\n"
                 f"**Draft:** {draft_svc.DRAFT_MODE_LABEL.get(c.draft_mode, c.draft_mode)}\n"
                 f"**Captains:** {draft_svc.CAPTAIN_METHOD_LABEL.get(method, method)} "

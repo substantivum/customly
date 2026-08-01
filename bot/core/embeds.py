@@ -24,6 +24,28 @@ def ts(dt: datetime, style: str = "F") -> str:
     return discord.utils.format_dt(as_utc(dt), style=style)
 
 
+ASAP_LABEL = "🔥 **ASAP**"
+
+
+def start_text(custom: Custom, style: str = "F") -> str:
+    """How a custom's start time reads to a player.
+
+    A custom created without a time carries a real `start_time` (the moment it
+    was made, so the overlap rule still works) but should never show a clock —
+    it says ASAP, because that's what was actually agreed.
+    """
+    if getattr(custom, "start_asap", False):
+        return ASAP_LABEL
+    return ts(custom.start_time, style)
+
+
+def start_line(custom: Custom) -> str:
+    """The fuller form, for a detail embed."""
+    if getattr(custom, "start_asap", False):
+        return f"{ASAP_LABEL} — as soon as the lobby is ready"
+    return f"{ts(custom.start_time, 'F')}  ({ts(custom.start_time, 'R')})"
+
+
 SHOW_MAX = 10  # keep an embed field under Discord's 1024-char limit
 
 
@@ -42,7 +64,7 @@ def custom_registration_embed(
         title=f"🎮 Custom #{custom.custom_id} — {custom.name}",
         description=(
             f"**Format:** {custom.format}  ·  **{custom.team_size}v{custom.team_size}**\n"
-            f"**Starts:** {ts(start, 'F')}  ({ts(start, 'R')})\n"
+            f"**Starts:** {start_line(custom)}\n"
             f"**Block:** {ts(start, 't')} – {ts(end, 't')}\n"
             f"**Map pool:** {pool}\n"
             f"**Draft:** {draft}\n"

@@ -243,7 +243,10 @@ class ReadyCheckView(_TimedView):
     def __init__(self, controller, on_resolve):
         super().__init__()
         self.c = controller
-        self.on_resolve = on_resolve    # async (timed_out: bool) -> None
+        # async () -> None. It takes no arguments on purpose: resolution reads
+        # the roster back from the database, so how we got here — everyone
+        # answered, or the clock ran out — changes nothing about what happens.
+        self.on_resolve = on_resolve
         self.SECONDS = settings.ready_check_seconds
         self._resolved = False
         self.add_item(self._Answer("Ready", True, discord.ButtonStyle.success, "✅"))
@@ -252,20 +255,20 @@ class ReadyCheckView(_TimedView):
     async def _apply(self, user_id: int, ok: bool, *, itx):
         self.c.mark(user_id, ok)
         if self.c.all_answered:
-            return await self._finish(itx=itx, timed_out=False)
+            return await self._finish(itx=itx)
         await self._redraw(self.c.embed(), itx=itx, view=self)
 
-    async def _finish(self, *, itx, timed_out: bool):
+    async def _finish(self, *, itx):
         if self._resolved:
             return
         self._resolved = True
         self._cancel()
         self.stop()
         await self._redraw(self.c.embed(outcome="Resolving…"), itx=itx, view=None)
-        await self.on_resolve(timed_out)
+        await self.on_resolve()
 
     async def on_timeout_step(self):
-        await self._finish(itx=None, timed_out=True)
+        await self._finish(itx=None)
 
     async def cancel(self, note: str) -> None:
         """Called off from outside — a manual start, or the custom going away."""

@@ -9,7 +9,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     discord_token: str
-    db_path: str = "/app/data/bot.db"
+    # Relative to the bot's working directory on purpose: under Docker that's
+    # /app (so this is the mounted /app/data volume), and on a panel host
+    # (bot-hosting, Pterodactyl) it's /home/container — where an absolute
+    # /app/... path doesn't exist and the filesystem is read-only.
+    db_path: str = "data/bot.db"
     customs_category_id: int | None = None      # optional default
     custom_config_channel: int | None = None    # #custom-config id
     default_voice_channel: int | None = None     # where players go when a match ends

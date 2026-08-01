@@ -53,7 +53,7 @@ owner (or anyone with Administrator) is treated as **SuperAdmin** automatically.
 | Variable | Required | Purpose |
 |---|---|---|
 | `DISCORD_TOKEN` | yes | Bot token |
-| `DB_PATH` | yes | SQLite file path (keep on the mounted volume, e.g. `/app/data/bot.db`) |
+| `DB_PATH` | yes | SQLite file path, **relative to the bot's own folder** — `data/bot.db` works everywhere. Under Docker that's the mounted `./data` volume; on a panel host it's `/home/container/data`. An absolute `/app/...` path exists **only** inside Docker and will crash a panel host with a read-only-filesystem error |
 | `GUILD_ID` | no | Sync commands to one server instantly (use during testing) |
 | `ADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **admin**, and may talk in every custom's channel |
 | `SUPERADMIN_ROLE` | no | Discord role id — everyone holding it is a bot **superadmin**, and may talk in every custom's channel |
@@ -202,7 +202,7 @@ people can use the same board at once. It auto-dismisses after ~3 minutes idle.
 ### Admin (owner of the custom unless noted)
 | Command | Description |
 |---|---|
-| `/custom create name format start [maps] [team_size] [draft] [captains]` | Create a custom (run in `#custom-config`); **maps optional — blank = all enabled**, or `competitive` for the competitive pool; **draft** = snake (default) or one by one; **captains** = random (default) / highest RR / highest peak |
+| `/custom create name format [start] [maps] [team_size] [draft] [captains]` | Create a custom (run in `#custom-config`); **start optional — blank = 🔥 ASAP**; **maps optional — blank = all enabled**, or `competitive` for the competitive pool; **draft** = snake (default) or one by one; **captains** = random (default) / highest RR / highest peak |
 | `/match readycheck custom_id` | Post a ready check now — every starter is tagged and must confirm (§8.4) |
 | `/custom transfer custom_id to:@user` | Hand ownership to another admin — the registration embed is redrawn and the new owner is notified (DM + a note in the custom's channel) |
 | `/custom delete custom_id [force]` | Delete a custom (occupancy guard; `force` = superadmin) |
@@ -231,8 +231,14 @@ people can use the same board at once. It auto-dismisses after ~3 minutes idle.
 `/custom create` (in `#custom-config`) or panel → **Create custom**.
 - **format:** BO1 / BO3 / BO5
 - **team_size:** 1–5 → 1v1 … 5v5 (queue size = team_size × 2)
-- **start:** `HH:MM` in server time (`TZ_OFFSET` in `.env`) or full ISO. A time
+- **start:** **optional.** Leave it blank (or type `asap`) and the custom is
+  marked **🔥 ASAP** — everywhere it would show a clock it says ASAP instead.
+  Otherwise `HH:MM` in server time (`TZ_OFFSET` in `.env`) or full ISO; a time
   that already passed today is taken as tomorrow.
+  An ASAP custom is still stamped with a real instant behind the scenes (the
+  moment it was created), so the time-block overlap rule in §8.2 applies to it
+  exactly as it does to a scheduled one — you can't sign up for an ASAP game and
+  a scheduled one that's running at the same time.
 - **maps:** comma-separated, must be in the enabled pool. **Optional** — leave it
   blank to use **all enabled maps** in the server pool (run `/maps seed` first).
   Type `competitive` (or hit **⭐ Competitive pool** in the panel) to take the
@@ -509,6 +515,7 @@ registration → full → ready → captains → veto → live → done
 | Party code says "hasn't started a match yet" | It needs `/match start` first — the code lives on the match. |
 | Players aren't moved into team VCs | The bot needs **Move Members** + a role above them, and **Server Members**/**Voice State** intents enabled. Players not in voice at start can't be pulled — they join the channel themselves. |
 | Missing-column error on an old DB | On boot the bot adds any columns the models gained (`draft_mode`, `vc_a`/`vc_b`, `maps.competitive`, the match's side pick, …). If a DB predates that and still errors, delete `bot.db` (dev) or add the column by hand, e.g. `ALTER TABLE customs ADD COLUMN team_size INTEGER DEFAULT 5;`. |
+| `OSError: [Errno 30] Read-only file system: '/app'` on boot | `DB_PATH` is an absolute Docker path but you're on a panel host (bot-hosting, Pterodactyl) where `/app` doesn't exist. Set `DB_PATH=data/bot.db` — relative works in both places. |
 | Docker "mount source path … file exists" (WSL) | Run `wsl --shutdown`, restart Docker Desktop, then `docker compose down && up`. Or switch `./data` to a named volume. Keep the project under `/home/...`, not `/mnt/c/...`. |
 | Permission errors creating channels/VCs | The bot needs **Manage Channels**. |
 

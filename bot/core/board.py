@@ -20,7 +20,7 @@ import discord
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core.embeds import VAL_RED, ts
+from bot.core.embeds import VAL_RED, start_text
 from bot.db import SessionLocal
 from bot.db.models import Ban, Custom, MemberRole
 from bot.services import custom as custom_svc
@@ -69,7 +69,8 @@ async def custom_line(c: Custom, *, with_owner: bool = False) -> str:
         f"{STATE_EMOJI.get(c.state, '•')} **#{c.custom_id} · {c.name}**",
         f"{c.format} · {c.team_size}v{c.team_size} · **{taken}/{size}** seats"
         + (f" (+{waiting} 🪑)" if waiting else ""),
-        f"starts {ts(c.start_time, 'R')} · `{c.state}`",
+        (start_text(c) if c.start_asap else f"starts {start_text(c, 'R')}")
+        + f" · `{c.state}`",
     ]
     if with_owner:
         bits.append(f"owner <@{c.owner_id}>")
@@ -188,11 +189,11 @@ async def super_embed(guild: discord.Guild) -> discord.Embed:
     e.add_field(name="👑 Superadmins",
                 value=_role_line(guild, settings.superadmin_role, supers), inline=False)
     e.add_field(name="🔨 Banned players", value=str(bans), inline=True)
-    e.add_field(name="⚙️ Config", value=_config_summary(guild), inline=True)
+    e.add_field(name="⚙️ Config", value=_config_summary(), inline=True)
     return _stamp(e, "Updates itself when a custom changes")
 
 
-def _config_summary(guild: discord.Guild) -> str:
+def _config_summary() -> str:
     def mark(value: int | None, label: str) -> str:
         return f"{'✅' if value else '⚠️'} {label}"
 

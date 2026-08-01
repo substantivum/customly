@@ -24,7 +24,8 @@ class CustomCog(commands.GroupCog, name="custom"):
     @app_commands.command(description="Create a custom (admin, in the config channel).")
     @require("admin")
     @app_commands.describe(
-        name="Custom name", format="BO1/BO3/BO5", start="HH:MM (server time) or ISO",
+        name="Custom name", format="BO1/BO3/BO5",
+        start="HH:MM (server time) or ISO — omit to start ASAP",
         maps="Comma-separated pool, or `competitive` for the current competitive "
              "pool (optional — defaults to all enabled maps)",
         team_size="Players per side: 1 (1v1) … 5 (5v5). Default 5.",
@@ -42,7 +43,8 @@ class CustomCog(commands.GroupCog, name="custom"):
         ],
     )
     async def create(
-        self, itx: discord.Interaction, name: str, format: str, start: str,
+        self, itx: discord.Interaction, name: str, format: str,
+        start: str = "",
         maps: str = "",
         team_size: app_commands.Range[int, 1, 5] = 5,
         draft: app_commands.Choice[str] | None = None,

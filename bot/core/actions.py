@@ -77,15 +77,30 @@ def flow_step(channel, what: str):
 
 
 # ----------------------------------------------------------- time parsing ---
+# Leaving the start time out means "we're playing now" — the common case for a
+# custom thrown together on the spot.
+ASAP_TOKENS = {"", "asap", "now", "immediately"}
+
+
+def is_asap(raw: str | None) -> bool:
+    return (raw or "").strip().lower() in ASAP_TOKENS
+
+
 def parse_start(raw: str, tz_offset: int | None = None) -> datetime:
-    """`HH:MM` or ISO → a UTC instant.
+    """`HH:MM` or ISO → a UTC instant. Blank (or `asap`) → right now.
 
     Times are read in the server's local zone (`TZ_OFFSET` in .env) — Discord
     doesn't expose a user's timezone, so one server-wide offset is the closest
     thing to "just type the time you mean". A bare `HH:MM` that has already
     passed today rolls forward to tomorrow.
+
+    An ASAP custom still gets a real instant (now), so the time-block overlap
+    rule keeps working exactly as it does for a scheduled one — only the display
+    differs, driven by `Custom.start_asap`.
     """
-    raw = raw.strip()
+    raw = (raw or "").strip()
+    if is_asap(raw):
+        return datetime.now(timezone.utc)
     if tz_offset is None:
         tz_offset = settings.tz_offset
     tz = timezone(timedelta(hours=tz_offset))
@@ -151,6 +166,7 @@ async def create_custom_flow(
 ) -> Custom:
     start_dt = parse_start(start_raw, tz_offset)
     c = await custom_svc.create_custom(
+        start_asap=is_asap(start_raw),
         guild_id=itx.guild_id,
         owner_id=itx.user.id,
         name=name,
@@ -776,7 +792,7 @@ async def start_ready_check(
     view = ReadyCheckView(ctl, None)
 
     @flow_step(channel, "the match")
-    async def on_resolve(timed_out: bool):
+    async def on_resolve():
         await _resolve_ready_check(guild, custom_id, ctl, view)
 
     view.on_resolve = on_resolve

@@ -49,6 +49,7 @@ async def create_custom(
     team_size: int = 5,
     draft_mode: str = "snake",
     captain_method: str = "random",
+    start_asap: bool = False,
 ) -> Custom:
     fmt = fmt.upper()
     if fmt not in DURATION:
@@ -107,6 +108,7 @@ async def create_custom(
             draft_mode=draft_mode,
             captain_method=captain_method,
             start_time=start_time,
+            start_asap=start_asap,
             vc_category=vc_category,
             config_chan=config_chan,
             owner_id=owner_id,

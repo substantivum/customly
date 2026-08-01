@@ -15,8 +15,13 @@ Local (no Docker):
 
 ```bash
 pip install -r requirements.txt
-DISCORD_TOKEN=... GUILD_ID=... DB_PATH=./data/bot.db python -m bot
+DISCORD_TOKEN=... GUILD_ID=... DB_PATH=data/bot.db python -m bot
 ```
+
+On a panel host (bot-hosting.net, Pterodactyl) point the entry file at `main.py`
+and keep **`DB_PATH=data/bot.db`** — a relative path resolves to the bot's own
+folder in every environment. An absolute `/app/...` path exists only inside the
+Docker image and will crash a panel host with a read-only-filesystem error.
 
 Tests (pure logic, no token needed):
 
@@ -49,7 +54,7 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 |---|---|---|
 | `/register riot_id` | player | tag only; rank/RR/peak optional |
 | `/profile [member]` | player | |
-| `/custom create name format start maps [team_size] [draft] [captains]` | admin (owner) | spawns `#<creator>-<name>`; team_size 1–5 (1v1…5v5); `maps:competitive` = current competitive pool; `draft` = snake or one-by-one; `captains` = random / highest_rr / highest_peak |
+| `/custom create name format [start] [maps] [team_size] [draft] [captains]` | admin (owner) | spawns `#<creator>-<name>`; **blank `start` = 🔥 ASAP**; team_size 1–5 (1v1…5v5); `maps:competitive` = current competitive pool; `draft` = snake or one-by-one; `captains` = random / highest_rr / highest_peak |
 | `/custom register \| leave \| list` | player | overlap-checked registration |
 | `/custom transfer <id> to:@user` | owner / superadmin | reassigns ownership; redraws the embed + DMs the new owner |
 | `/custom delete <id> [force]` | owner / superadmin | occupancy guard; `force` = superadmin |
@@ -72,7 +77,9 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 1. **Create** — admin runs `/custom create` in `#custom-config`. Bot derives the
    time block (`BO1=1h / BO3=3h / BO5=5h`), creates the custom + its queue, and
    spawns a dedicated `#<creator>-<name>` text channel with a registration embed
-   (Register / Leave buttons).
+   (Register / Leave buttons). **Leaving the start time out marks it 🔥 ASAP** —
+   it shows as ASAP everywhere instead of a clock, while still holding a real
+   time block so the overlap rule in step 2 applies.
 2. **Register** — players register (button or `/custom register`). A player may
    hold many customs **as long as their `[start, start+duration)` blocks don't
    overlap**; a clash is rejected and names the conflicting custom. A custom has

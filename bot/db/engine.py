@@ -13,10 +13,22 @@ from sqlalchemy.ext.asyncio import (
 from bot.config import settings
 from bot.db.models import Base
 
-# Ensure the data dir exists (sqlite file lives on the mounted volume)
-_db_dir = os.path.dirname(settings.db_path)
-if _db_dir:
+# Ensure the data dir exists (sqlite file lives on the mounted volume).
+# abspath() so a bare `bot.db` still yields a directory to check.
+_db_dir = os.path.dirname(os.path.abspath(settings.db_path))
+try:
     os.makedirs(_db_dir, exist_ok=True)
+except OSError as e:
+    # This runs at import, so a bare OSError here kills the bot with a traceback
+    # that says nothing about the actual mistake — which is nearly always a
+    # DB_PATH copied from the Docker layout onto a host that doesn't have it.
+    raise RuntimeError(
+        f"Can't create the database directory {_db_dir!r}: {e.strerror}.\n"
+        f"DB_PATH is currently {settings.db_path!r}.\n"
+        f"Use a path relative to the bot's own folder — DB_PATH=data/bot.db — "
+        f"which works both in Docker and on a panel host. An absolute "
+        f"/app/... path exists only inside the Docker image."
+    ) from e
 
 engine = create_async_engine(settings.db_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

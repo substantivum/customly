@@ -339,3 +339,43 @@ def test_choose_captains_by_rr_and_peak():
     assert set(choose_captains("highest_rr", players)) == {2, 3}
     assert set(choose_captains("highest_peak", players)) == {3, 2}
     assert len(set(choose_captains("random", players))) == 2
+
+
+# --------------------------------------------------------------- ASAP start ---
+def test_blank_start_means_asap():
+    from bot.core.actions import is_asap
+
+    for raw in ("", "   ", "ASAP", "asap", "Now", "immediately", None):
+        assert is_asap(raw), raw
+    for raw in ("20:00", "2030-06-24T20:00", "tomorrow"):
+        assert not is_asap(raw), raw
+
+
+def test_asap_parses_to_now_not_an_error():
+    """ASAP still gets a real instant, so the overlap rule keeps working."""
+    from bot.core.actions import parse_start
+
+    before = datetime.now(timezone.utc)
+    got = parse_start("")
+    after = datetime.now(timezone.utc)
+    assert before <= got <= after
+
+
+def test_asap_customs_still_conflict_on_overlap():
+    """Two ASAP customs start at the same instant, so they must clash."""
+    now = datetime.now(timezone.utc)
+    assert _overlaps(now, 1, now, 1) is True
+
+
+def test_start_text_says_asap_instead_of_a_clock():
+    from types import SimpleNamespace
+
+    from bot.core.embeds import start_line, start_text
+
+    when = datetime(2030, 6, 24, 20, 0, tzinfo=timezone.utc)
+    asap = SimpleNamespace(start_time=when, start_asap=True)
+    timed = SimpleNamespace(start_time=when, start_asap=False)
+
+    assert "ASAP" in start_text(asap) and "ASAP" in start_line(asap)
+    assert "<t:" not in start_text(asap)          # never a timestamp
+    assert "<t:" in start_text(timed) and "ASAP" not in start_line(timed)
