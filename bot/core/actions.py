@@ -5,6 +5,7 @@ call the exact same flows without duplication or circular imports.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -26,7 +27,6 @@ from bot.core.views import (
     CoinflipView,
     DraftView,
     ReadyCheckView,
-    SidePickView,
     VetoView,
     registration_view,
 )
@@ -43,6 +43,7 @@ from bot.db.models import (
 from bot.services import custom as custom_svc
 from bot.services import draft as draft_svc
 from bot.services import queue_svc, voice
+from bot.services import veto as veto_svc
 
 log = logging.getLogger("valbot.flow")
 
@@ -436,44 +437,22 @@ async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
     view = VetoView(veto_ctl)
     view.channel = channel
 
-    @flow_step(channel, "the side pick")
+    @flow_step(channel, "the match lobby")
     async def _finish():
-        await _run_side_pick(guild, channel, custom, match_id, veto_ctl, cap_a, cap_b)
+        # The decider's side lives on the match row as well, so a lobby drawn by
+        # a build that predates the per-map table still shows something.
+        if veto_ctl.sides:
+            name, chooser, choice = veto_ctl.sides[-1]
+            async with SessionLocal() as s:
+                m = await s.get(Match, match_id)
+                if m:
+                    m.side_map, m.side_pick, m.side_pick_side = name, choice, chooser
+                    await s.commit()
+        await finish_veto(guild, channel, custom, match_id)
 
     view.on_done = _finish
     view.message = await channel.send(embed=veto_ctl.embed(), view=view)
     view.arm()  # start the per-turn auto-pick timer
-
-
-async def _run_side_pick(guild, channel, custom, match_id, veto_ctl, cap_a, cap_b):
-    """Attack or defence on the decider, chosen by the team that didn't ban it
-    away. Straight to the lobby if the veto had no sided step to derive it from."""
-    side = veto_ctl.side_choice_side
-    if side is None:
-        return await finish_veto(guild, channel, custom, match_id)
-    captain_id = cap_a if side == "A" else cap_b
-    decider = veto_ctl.decider_map
-
-    @flow_step(channel, "the match lobby")
-    async def _done(choice: str, auto: bool):
-        async with SessionLocal() as s:
-            m = await s.get(Match, match_id)
-            if m:
-                m.side_map = decider
-                m.side_pick = choice
-                m.side_pick_side = side
-                await s.commit()
-        on_map = f" on **{decider}**" if decider else ""
-        note = " _(auto)_" if auto else ""
-        await channel.send(
-            f"🎯 Team {side} starts **{choice.title()}**{on_map}{note}."
-        )
-        await finish_veto(guild, channel, custom, match_id)
-
-    view = SidePickView(match_id, side, captain_id, decider, _done)
-    view.channel = channel
-    view.message = await channel.send(embed=view.embed(), view=view)
-    view.arm()
 
 
 async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Embed | None:
@@ -483,7 +462,7 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
     buttons can redraw it at any time — including after a bot restart, when the
     draft/veto controllers are long gone.
     """
-    from bot.db.models import MapVeto
+    from bot.db.models import MapVeto, MatchMapSide
 
     async with SessionLocal() as s:
         c = await s.get(Custom, custom_id)
@@ -510,6 +489,17 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
                 ).order_by(MapVeto.step)
             )).all()
         ]
+        sides = {
+            r.map_name: (r.team_side, r.choice)
+            for (r,) in (await s.execute(
+                select(MatchMapSide).where(MatchMapSide.match_id == c.match_id)
+                .order_by(MatchMapSide.map_index)
+            )).all()
+        }
+        # Matches played before sides were tracked per map kept only the
+        # decider's, on the match row itself.
+        if not sides and m and m.side_map and m.side_pick and m.side_pick_side:
+            sides = {m.side_map: (m.side_pick_side, m.side_pick)}
 
     def _squad(side: str) -> str:
         cap = caps.get(side)
@@ -522,16 +512,19 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
     )
     e.add_field(name="🟥 Team A", value=_squad("A"), inline=True)
     e.add_field(name="🟦 Team B", value=_squad("B"), inline=True)
-    e.add_field(name="🗺 Maps", value=", ".join(maps) or "—", inline=False)
-    if m and m.side_pick and m.side_pick_side:
-        other = "B" if m.side_pick_side == "A" else "A"
-        flip = "defence" if m.side_pick == "attack" else "attack"
-        e.add_field(
-            name="🎯 Sides" + (f" — {m.side_map}" if m.side_map else ""),
-            value=f"Team {m.side_pick_side} **{m.side_pick}** · "
-                  f"Team {other} **{flip}**",
-            inline=False,
-        )
+    def _map_line(i: int, name: str) -> str:
+        chooser, choice = sides.get(name, (None, None))
+        if not chooser:
+            return f"**{i}. {name}**"
+        flip = "defence" if choice == "attack" else "attack"
+        return (f"**{i}. {name}** — 🟥 Team A {choice if chooser == 'A' else flip}"
+                f" · 🟦 Team B {choice if chooser == 'B' else flip}")
+
+    e.add_field(
+        name="🗺 Maps",
+        value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or "—",
+        inline=False,
+    )
     e.add_field(
         name="🔑 Party code",
         value=f"`{m.party_code}`" if m and m.party_code else "_not set yet_",
@@ -588,6 +581,12 @@ async def begin_match(
             f"Custom #{custom_id} already has a match in progress (state: {c.state}). "
             "Finish it, or run `/custom delete` to reset and start over."
         )
+    # Check the pool before anything is created: a custom made before the format
+    # got its pool rule would otherwise strand two drafted teams at the veto.
+    try:
+        veto_svc.check_pool(c.format, len(json.loads(c.map_pool)))
+    except ValueError as e:
+        raise BotError(f"{e} Recreate the custom with a pool that fits.")
     # The method is fixed when the custom is created; `captains` overrides it
     # only where a caller genuinely needs to (e.g. `/match start captains:manual`).
     captains = captains or c.captain_method or "random"
@@ -648,9 +647,10 @@ async def begin_match(
     for cap_id in (cap_a, cap_b):
         await allow_write(channel, guild.get_member(cap_id), reason="captain")
 
+    # No letters yet on purpose — the coin toss below decides who is Team A.
     await channel.send(
         f"🎬 **Match #{match_id}** ({per_side}v{per_side}) — "
-        f"captains <@{cap_a}> (A) vs <@{cap_b}> (B) "
+        f"captains <@{cap_a}> vs <@{cap_b}> "
         f"({draft_svc.CAPTAIN_METHOD_LABEL.get(captains, captains)})."
     )
     if subs:
@@ -660,23 +660,21 @@ async def begin_match(
             + " — you signed up after the seats filled."
         )
 
-    if not pool:
-        # 1v1: there is nobody to draft, so a toss for pick order decides nothing.
-        await _run_draft(guild, channel, c, match_id, cap_a, cap_b, pool, "A")
-        return match_id, channel, cap_a, cap_b, per_side
-
-    # Coin toss first: a random captain calls it, the winner takes first or
-    # second pick, and that decides who opens the draft.
+    # Coin toss first: a random captain calls it and the winner takes Team A or
+    # Team B. It runs even in a 1v1, where there's no draft to order but Team A
+    # still bans first. The captains may swap letters, so read them back off the
+    # controller rather than trusting the pair we came in with.
     coin = CoinflipController(match_id, cap_a, cap_b)
 
     @flow_step(channel, "the draft")
-    async def after_coin(first_side: str):
+    async def after_coin(toss: CoinflipController):
         async with SessionLocal() as s:
             m = await s.get(Match, match_id)
             if m:
-                m.first_pick_side = first_side
+                m.first_pick_side = toss.first_side
                 await s.commit()
-        await _run_draft(guild, channel, c, match_id, cap_a, cap_b, pool, first_side)
+        await _run_draft(guild, channel, c, match_id, toss.cap_a, toss.cap_b,
+                         pool, toss.first_side)
 
     cview = CoinflipView(coin, after_coin)
     cview.channel = channel
@@ -725,7 +723,7 @@ async def start_match(
     )
     await itx.followup.send(
         f"Match #{match_id} starting ({per_side}v{per_side}) in {channel.mention}. "
-        f"Captains: <@{cap_a}> (A) vs <@{cap_b}> (B).",
+        f"Captains: <@{cap_a}> vs <@{cap_b}> — the coin toss decides who's Team A.",
         ephemeral=True,
     )
 

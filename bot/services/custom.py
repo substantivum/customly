@@ -92,11 +92,10 @@ async def create_custom(
             bad = [m for m in chosen if m.lower() not in enabled]
             if bad:
                 raise BotError(f"Maps not in enabled pool: {', '.join(bad)}")
-        need = veto_svc.MIN_POOL[fmt]
-        if len(chosen) < need:
-            raise BotError(
-                f"{fmt} needs at least {need} maps in the pool (got {len(chosen)})."
-            )
+        try:
+            veto_svc.check_pool(fmt, len(chosen))
+        except ValueError as e:
+            raise BotError(str(e))
 
         c = Custom(
             guild_id=guild_id,

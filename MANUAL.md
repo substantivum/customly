@@ -242,7 +242,7 @@ people can use the same board at once. It auto-dismisses after ~3 minutes idle.
 - **maps:** comma-separated, must be in the enabled pool. **Optional** — leave it
   blank to use **all enabled maps** in the server pool (run `/maps seed` first).
   Type `competitive` (or hit **⭐ Competitive pool** in the panel) to take the
-  server's current competitive pool — see §8.14.
+  server's current competitive pool — see §8.13.
 - **draft:** how the captains pick — **snake** (A, BB, AA, … — default) or
   **one by one** (A, B, A, B, …). Shown on the registration embed.
 - **captains:** how the two captains are chosen when this custom starts —
@@ -341,22 +341,26 @@ An admin can then re-run the check or force start.
 > so on boot any custom stranded in `ready` is put back to `full` / `registration`
 > and can simply be checked again.
 
-### 8.5 Coin toss
+### 8.5 Coin toss — who is Team A
 Before anyone drafts, the bot posts a coin toss in the custom's channel:
 
 1. A **random captain** is put on the clock and calls **Heads** or **Tails**.
 2. The coin lands; whoever called it right **wins the toss**.
-3. The toss winner picks **First pick** or **Second pick** — that decides which
-   side opens the draft (the whole draft order mirrors accordingly).
+3. The toss winner takes **🟥 Team A** or **🟦 Team B**. This is the same right
+   the official rules give the better-seeded team, and it is a real trade:
+   **Team A drafts first and bans first.**
+
+If the winner takes the letter they weren't provisionally holding, the two
+captains simply swap places — everything downstream reads Team A as Team A.
 
 Only the captain on the clock can click. Each step has the draft timer
 (`DRAFT_PICK_SECONDS`); on timeout the bot decides that step at random and marks
-the result _(auto)_. In a 1v1 there's nobody to draft, so the toss is skipped.
+the result _(auto)_. The toss runs even in a 1v1, where there's no draft to
+order but Team A still bans first.
 
 ### 8.6 Draft — snake or one by one
-The two captains draft the remaining players from a dropdown, starting with the
-side that won first pick. The order comes from the custom's **draft mode**, set
-at creation:
+The two captains draft the remaining players from a dropdown, **Team A first**.
+The order comes from the custom's **draft mode**, set at creation:
 
 - **🐍 Snake** — A, BB, AA, BB … (the default; evens out the first-pick edge)
 - **🔁 One by one** — A, B, A, B … (strict alternation, so first pick is worth more)
@@ -365,37 +369,44 @@ Each turn has a timer (`DRAFT_PICK_SECONDS`); if a captain stalls, the bot
 **auto-drafts a random remaining player**. In a 1v1 there's nobody to draft, so this
 step is skipped automatically.
 
-### 8.7 Map veto
-Uses the **custom's** map pool. BO1 alternates bans down to one; BO3/BO5 open with
-ban/ban/pick… then alternate bans through any surplus maps to the decider, so a pool
-of any size resolves to the right number of maps. Minimum pool: **2** for BO1,
-**5** for BO3, **7** for BO5 — creation is rejected below that.
-Buttons appear per remaining map; only the captain on the
-clock may act. Each turn has a timer (`VETO_PICK_SECONDS`); on timeout the bot
-**bans/picks a random remaining map**.
+### 8.7 Map selection — bans, picks and sides
+Uses the **custom's** map pool and follows the official Riot map selection
+process. Team A acts first; **every map gets its own side pick**, chosen by the
+team that did *not* pick that map.
 
-### 8.8 Attack or defence
-Veto done, the bot asks for sides on the **decider** (the last map standing): the
-team that did **not** make the last ban picks **🔫 Attack** or **🛡 Defence**, and
-the other team takes the opposite. Only that team's captain can click; on timeout
-(`VETO_PICK_SECONDS`) the bot picks at random and marks it _(auto)_. The choice is
-announced in the channel and shown in the lobby embed. (If a veto had no bans at
-all — a minimum-size BO3 pool — the last team to act loses the choice instead.)
+**BO3 and BO5 need exactly 7 maps** — the published sequences are written for
+the competitive pool, so `/custom create` and `/match start` both refuse
+anything else. `maps:competitive` is the easy way to get them. **BO1 runs on any
+pool of 2+**, alternating bans down to one map; on a 7-map pool that is the
+official BO1 sequence.
 
-### 8.9 Going live — the match lobby
+| Format | Sequence |
+|---|---|
+| BO1 | ban A, ban B, ban A, ban B, ban A, ban B → map 7 → **side A** |
+| BO3 | ban A, ban B, **pick A** → side B, **pick B** → side A, ban A, ban B → map 3 → **side A** |
+| BO5 | ban A, ban B, **pick A** → side B, **pick B** → side A, **pick A** → side B, **pick B** → side A → map 5 → **side B** |
+
+The whole thing runs on one message that swaps its buttons per step: one button
+per remaining map on a ban/pick, **🔫 Attack / 🛡 Defence** on a side step. Only
+the captain on the clock may act. Each turn has a timer (`VETO_PICK_SECONDS`);
+on timeout the bot decides that step at random and marks the result _(auto)_.
+The decider needs no click — the last map standing is taken automatically, and
+its side pick follows immediately.
+
+### 8.8 Going live — the match lobby
 When sides are settled, the bot marks the match **live** and posts the **lobby** in
 the custom's own channel: both teams (👑 marks the captain), the chosen maps, the
 sides, the party code, and links to the team voice channels. Two buttons sit under it:
 
 - **🔑 Set party code** — opens a small modal; the lobby embed updates in place.
-- **🏁 End custom** — ends the match (see 8.11).
+- **🏁 End custom** — ends the match (see §8.10).
 
 Both work for **anyone registered for that custom**, plus admins. Discord can't hide
 a button from specific viewers, so everyone sees them, but a click from someone who
 isn't in the custom is refused with a private message. The buttons are persistent —
 they keep working after a bot restart.
 
-### 8.10 Voice channels
+### 8.9 Voice channels
 At game start the bot creates one voice channel per team under the customs
 category, named after the custom, the side and that team's captain —
 `friday-5v5-a-salta` / `friday-5v5-b-nex` — so several concurrent customs are easy
@@ -405,23 +416,23 @@ already-connected players into their team VC; after that, players may leave and
 rejoin freely and are never auto-moved again. Anyone not connected at start simply
 joins the channel themselves.
 
-### 8.11 Party code
+### 8.10 Party code
 Lobby → **🔑 Set party code** (preferred), or `/match partycode custom_id code`.
 Settable by **any player registered for the custom** (and admins), and visible to
 everyone. The match must have started first — the code lives on the match.
 
-### 8.12 End a match
+### 8.11 End a match
 Lobby → **🏁 End custom**, `/match end custom_id`, or panel → **Manage customs →
 End**. Any registered player can end it once it has started. Ending marks the match
 completed and the custom done, then **deletes the team voice channels and the
 custom's text channel** (anyone still in voice is moved to `DEFAULT_VOICE_CHANNEL`,
 or disconnected if that isn't set). The DB records are kept for stats/audit.
 
-### 8.13 Results
+### 8.12 Results
 `/match result match_id map_name score_a score_b` records each map's score and
 winner. Restricted to a captain of that match or an admin.
 
-### 8.14 The competitive map pool
+### 8.13 The competitive map pool
 Riot's active rotation is a subset of every map that exists, and it changes every
 few acts. Rather than re-ticking it on every custom, mark it once:
 
@@ -434,7 +445,7 @@ Once set, custom creation can take it in one step: the **⭐ Competitive pool**
 button in the panel, or `maps:competitive` on `/custom create`. `/maps list` and
 the Maps panel mark pool members with ⭐.
 
-### 8.15 Transferring a custom
+### 8.14 Transferring a custom
 `/custom transfer custom_id to:@user`, or panel → **Manage customs → Transfer
 ownership to…**. The owner or a superadmin can do it. On transfer the bot:
 
@@ -472,10 +483,10 @@ registration → full → ready → captains → veto → live → done
 - **Bans:** `/admin ban`, `/admin unban`, `/admin bans` (or panel → Bans). A ban
   blocks the player from registering for any future custom in the server.
 - **Maps:** `/maps seed|add|remove|toggle`. Disabled maps can't be put in a pool.
-  `/maps competitive` (or the panel) sets the ⭐ competitive pool — see §8.14.
+  `/maps competitive` (or the panel) sets the ⭐ competitive pool — see §8.13.
 - **Ownership:** `/custom transfer` reassigns a custom; the new owner must be an
   admin. Registrations and channels are untouched — the registration embed is
-  redrawn and the new owner is notified (§8.15).
+  redrawn and the new owner is notified (§8.14).
 - **Delete / prune:** `/custom delete` (own) / `/custom prune` (all, superadmin).
   Cascades the registrations, queue, the custom's text channel and team VCs.
 - **Occupancy guard:** delete/prune is blocked while **both** team voice channels

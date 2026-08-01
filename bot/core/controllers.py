@@ -10,20 +10,27 @@ from sqlalchemy import select
 
 from bot.core.embeds import VAL_RED
 from bot.db import SessionLocal
-from bot.db.models import DraftPick, MapVeto, MatchPlayer, MatchTeam
+from bot.db.models import DraftPick, MapVeto, MatchMapSide, MatchPlayer, MatchTeam
 from bot.services import draft as draft_svc
 from bot.services import veto as veto_svc
+
+SIDES = ("attack", "defence")
 
 
 def other_side(side: str) -> str:
     return "B" if side == "A" else "A"
 
 
-class CoinflipController:
-    """Heads/tails toss that decides who drafts first.
+def other_choice(choice: str) -> str:
+    return "defence" if choice == "attack" else "attack"
 
-    A random captain calls the coin; whoever wins the toss then chooses first or
-    second pick — so the toss decides a right, not the order itself.
+
+class CoinflipController:
+    """Heads/tails toss that decides which team is Team A.
+
+    A random captain calls the coin; the winner then takes Team A or Team B.
+    Team A drafts first and opens the map veto, so taking B is a real trade —
+    it's the same right the official rules give the better-seeded team.
     """
 
     FACES = ("heads", "tails")
@@ -35,8 +42,13 @@ class CoinflipController:
         self.call: str | None = None          # heads|tails
         self.face: str | None = None          # what the coin landed on
         self.winner_side: str | None = None
-        self.first_side: str | None = None    # who picks first in the draft
+        self.letter: str | None = None        # the letter the winner took
         self.auto = False                     # any step decided by the timer
+
+    @property
+    def first_side(self) -> str | None:
+        """Team A opens the draft — but only once the letters are settled."""
+        return "A" if self.letter else None
 
     # ------------------------------------------------------------- helpers ---
     def captain(self, side: str) -> int:
@@ -50,8 +62,8 @@ class CoinflipController:
     def stage(self) -> str:
         if self.call is None:
             return "call"
-        if self.first_side is None:
-            return "order"
+        if self.letter is None:
+            return "letter"
         return "done"
 
     @property
@@ -62,7 +74,7 @@ class CoinflipController:
         """Whoever the flow is waiting on right now."""
         if self.stage == "call":
             return self.caller_id
-        if self.stage == "order":
+        if self.stage == "letter":
             return self.captain(self.winner_side)
         return None
 
@@ -77,19 +89,28 @@ class CoinflipController:
         self.auto = self.auto or auto
         return self.face
 
-    def choose_order(self, choice: str, auto: bool = False) -> str:
-        """`first` or `second` — sets which side opens the draft."""
-        self.first_side = (
-            self.winner_side if choice == "first" else other_side(self.winner_side)
-        )
+    def choose_letter(self, choice: str, auto: bool = False) -> str:
+        """`A` or `B` — the letter the toss winner takes.
+
+        The captains swap places when the winner takes the other letter, so
+        everything downstream (draft order, veto turns, team channels) can go on
+        reading Team A as Team A.
+        """
+        if choice not in ("A", "B"):
+            raise ValueError(choice)
+        if choice != self.winner_side:
+            self.cap_a, self.cap_b = self.cap_b, self.cap_a
+            self.caller_side = other_side(self.caller_side)
+            self.winner_side = choice
+        self.letter = choice
         self.auto = self.auto or auto
-        return self.first_side
+        return choice
 
     def random_call(self) -> str:
         return random.choice(self.FACES)
 
-    def random_order(self) -> str:
-        return random.choice(("first", "second"))
+    def random_letter(self) -> str:
+        return random.choice(("A", "B"))
 
     # ---------------------------------------------------------------- embed ---
     def embed(self) -> discord.Embed:
@@ -109,16 +130,18 @@ class CoinflipController:
             )
         if self.stage == "call":
             e.add_field(name="Waiting on", value="heads or tails", inline=False)
-        elif self.stage == "order":
+        elif self.stage == "letter":
             e.add_field(
                 name="Waiting on",
-                value=f"<@{self.captain(self.winner_side)}> — **first** or **second** pick",
+                value=f"<@{self.captain(self.winner_side)}> — **Team A** or **Team B**\n"
+                      f"Team A drafts first and bans first.",
                 inline=False,
             )
         else:
             e.add_field(
-                name="Draft order",
-                value=f"<@{self.captain(self.first_side)}> ({self.first_side}) picks first"
+                name="Teams",
+                value=f"🟥 Team A <@{self.cap_a}> · 🟦 Team B <@{self.cap_b}>\n"
+                      f"Team A drafts first and bans first."
                       + (" _(auto)_" if self.auto else ""),
                 inline=False,
             )
@@ -300,10 +323,12 @@ class VetoController:
         self.plan = veto_svc.veto_plan(fmt, len(pool))
         self.step = 0
         self.picked_maps: list[str] = []
-        self.history: list[tuple[str, str | None, str]] = []  # (action, side, map)
+        # (action, side, map, choice) — choice is set on side steps only
+        self.history: list[tuple[str, str | None, str, str | None]] = []
+        self.sides: list[tuple[str, str, str]] = []   # (map, chooser, choice)
 
     @property
-    def _current(self):
+    def current(self):
         return self.plan[self.step] if self.step < len(self.plan) else None
 
     @property
@@ -311,7 +336,7 @@ class VetoController:
         return self.step >= len(self.plan)
 
     def captain_for_turn(self) -> int | None:
-        cur = self._current
+        cur = self.current
         if cur is None or cur.side is None:
             return None
         return self.cap_a if cur.side == "A" else self.cap_b
@@ -322,60 +347,91 @@ class VetoController:
             return True
         return self.apply(random.choice(self.remaining))
 
+    def auto_pick_side(self) -> bool:
+        """Random attack/defence — used when a captain stalls on a side step."""
+        return self.apply_side(random.choice(SIDES))
+
     def apply(self, map_name: str) -> bool:
-        cur = self._current
-        if cur is None or map_name not in self.remaining:
-            return self.step >= len(self.plan)
+        cur = self.current
+        if cur is None or cur.action == "side" or map_name not in self.remaining:
+            return self.done
         if cur.action in ("pick",):
             self.picked_maps.append(map_name)
         self.remaining.remove(map_name)
         # record step (decider handled at completion)
         self._record(cur.action, cur.side, map_name)
         self.step += 1
-        # auto-resolve any trailing decider
-        if self._current and self._current.action == "decider" and len(self.remaining) == 1:
+        self._resolve_decider()
+        return self.done
+
+    def apply_side(self, choice: str) -> bool:
+        """Attack or defence on the map this step follows."""
+        cur = self.current
+        map_name = self.current_side_map
+        if cur is None or choice not in SIDES or map_name is None:
+            return self.done
+        self.sides.append((map_name, cur.side, choice))
+        self._record("side", cur.side, map_name, choice)
+        self.step += 1
+        # a side step can be the last thing standing between us and the decider
+        self._resolve_decider()
+        return self.done
+
+    def _resolve_decider(self) -> None:
+        """The last map standing needs nobody's click — take it automatically."""
+        cur = self.current
+        if cur and cur.action == "decider" and len(self.remaining) == 1:
             decider = self.remaining[0]
             self.picked_maps.append(decider)
             self._record("decider", None, decider)
             self.remaining.clear()
             self.step += 1
-        return self.step >= len(self.plan)
 
-    def _record(self, action: str, side: str | None, map_name: str) -> None:
+    def _record(self, action: str, side: str | None, map_name: str,
+                choice: str | None = None) -> None:
         self._pending = getattr(self, "_pending", [])
-        self._pending.append((self.step, action, side, map_name))
-        self.history.append((action, side, map_name))
+        self._pending.append((self.step, action, side, map_name, choice))
+        self.history.append((action, side, map_name, choice))
 
     @property
     def decider_map(self) -> str | None:
-        """The map the veto ends on — the one sides get chosen for."""
+        """The map the veto ends on."""
         return self.picked_maps[-1] if self.picked_maps else None
 
     @property
-    def side_choice_side(self) -> str | None:
-        """Team that picks attack/defence: the one that did NOT ban last.
+    def current_side_map(self) -> str | None:
+        """The map the pending side step is about — the one just decided."""
+        cur = self.current
+        if cur is None or cur.action != "side" or not self.picked_maps:
+            return None
+        return self.picked_maps[-1]
 
-        Falls back to the last team to act at all — a short BO3 pool can be all
-        picks and no bans, and someone still has to choose a side."""
-        for action, side, _ in reversed(self.history):
-            if action == "ban" and side:
-                return other_side(side)
-        for _action, side, _ in reversed(self.history):
-            if side:
-                return other_side(side)
-        return None
+    def side_text(self, map_name: str, chooser: str, choice: str) -> str:
+        flip = other_choice(choice)
+        return (f"**{map_name}** — Team {chooser} {choice}, "
+                f"Team {other_side(chooser)} {flip}")
 
     async def persist(self) -> None:
         async with SessionLocal() as s:
-            for step, action, side, name in getattr(self, "_pending", []):
+            for step, action, side, name, choice in getattr(self, "_pending", []):
+                if action == "side":
+                    continue
                 s.add(MapVeto(match_id=self.match_id, step=step,
                               action=action, team_side=side, map_name=name))
+            for i, (name, chooser, choice) in enumerate(self.sides, start=1):
+                s.add(MatchMapSide(match_id=self.match_id, map_index=i,
+                                   map_name=name, team_side=chooser, choice=choice))
             await s.commit()
         self._pending = []
 
     def result_text(self, auto: bool = False) -> str:
-        maps = ", ".join(self.picked_maps) if self.picked_maps else "—"
         note = " (auto)" if auto else ""
+        if self.sides:
+            lines = "\n".join(
+                f"{i}. {self.side_text(*s)}" for i, s in enumerate(self.sides, start=1)
+            )
+            return f"✅ Map selection complete{note}.\n{lines}"
+        maps = ", ".join(self.picked_maps) if self.picked_maps else "—"
         return f"✅ Veto complete{note}. Maps: **{maps}**"
 
     async def on_complete(self, itx: discord.Interaction) -> None:
@@ -387,7 +443,19 @@ class VetoController:
         e.add_field(name="Remaining", value=", ".join(self.remaining) or "—", inline=False)
         if self.picked_maps:
             e.add_field(name="Picked", value=", ".join(self.picked_maps), inline=False)
-        cur = self._current
+        if self.sides:
+            e.add_field(
+                name="🎯 Sides",
+                value="\n".join(self.side_text(*s) for s in self.sides),
+                inline=False,
+            )
+        cur = self.current
         if cur and cur.side:
-            e.add_field(name="Turn", value=f"<@{self.captain_for_turn()}> to {cur.action}", inline=False)
+            turn = (
+                f"<@{self.captain_for_turn()}> picks a side on "
+                f"**{self.current_side_map}**"
+                if cur.action == "side"
+                else f"<@{self.captain_for_turn()}> to {cur.action}"
+            )
+            e.add_field(name="Turn", value=turn, inline=False)
         return e

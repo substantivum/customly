@@ -54,7 +54,7 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 |---|---|---|
 | `/register riot_id` | player | tag only; rank/RR/peak optional |
 | `/profile [member]` | player | |
-| `/custom create name format [start] [maps] [team_size] [draft] [captains]` | admin (owner) | spawns `#<creator>-<name>`; **blank `start` = 🔥 ASAP**; team_size 1–5 (1v1…5v5); `maps:competitive` = current competitive pool; `draft` = snake or one-by-one; `captains` = random / highest_rr / highest_peak |
+| `/custom create name format [start] [maps] [team_size] [draft] [captains]` | admin (owner) | spawns `#<creator>-<name>`; **blank `start` = 🔥 ASAP**; team_size 1–5 (1v1…5v5); `maps:competitive` = current competitive pool (**BO3/BO5 need exactly 7 maps**); `draft` = snake or one-by-one; `captains` = random / highest_rr / highest_peak |
 | `/custom register \| leave \| list` | player | overlap-checked registration |
 | `/custom transfer <id> to:@user` | owner / superadmin | reassigns ownership; redraws the embed + DMs the new owner |
 | `/custom delete <id> [force]` | owner / superadmin | occupancy guard; `force` = superadmin |
@@ -100,27 +100,35 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
    for one start and is the only place `manual` (`captain_a`/`captain_b`) lives.
    **Team size is set per custom (1v1 … 5v5).**
 5. **Coin toss** — a random captain calls heads or tails; the toss winner then
-   takes **first or second pick**, which opens the draft on their side.
+   takes **Team A or Team B**. Team A drafts first and bans first, so taking B is
+   a real trade. The captains swap places if the winner takes the other letter.
 6. **Draft** — a player Select, turn-gated, in the custom's chosen mode:
    **snake** (A, BB, AA, …) or **one by one** (A, B, A, B, …). Both are set at
    creation. A per-turn timer auto-picks if a captain stalls.
-7. **Veto** — uses the **custom's** map pool. BO1 alternates bans to one;
-   BO3/BO5 follow ban/ban/pick…/decider. Buttons per remaining map, turn-gated.
-8. **Sides** — veto done, the team that did **not** make the last ban picks
-   **attack or defence** on the decider; it lands in the lobby embed.
-9. **Voice** — when veto starts the bot creates `<custom>-a-<captain>` /
+7. **Map selection** — the official Riot process on the **custom's** pool, with
+   **a side pick on every map**, made by the team that didn't pick it:
+   - BO1 — ban A, ban B … down to map 7, then **side A**
+   - BO3 — ban A, ban B, pick A → side B, pick B → side A, ban A, ban B,
+     map 3, **side A**
+   - BO5 — ban A, ban B, then picks alternating with side picks, map 5,
+     **side B**
+
+   One turn-gated message swaps its buttons per step: maps on a ban/pick,
+   🔫 Attack / 🛡 Defence on a side. **BO3/BO5 need exactly 7 maps** (the
+   competitive pool); BO1 runs on any pool of 2+.
+8. **Voice** — when veto starts the bot creates `<custom>-a-<captain>` /
    `<custom>-b-<captain>` (e.g. `friday-5v5-a-salta`)
    under the Customs category and **moves already-connected players** in. The
    channels are **open to everyone**, so friends and observers just join. Players
    are moved **once, at game start** only — afterwards they can leave and rejoin
    freely. Discord can't pull someone who isn't in voice; those players simply
    join the channel themselves.
-10. **Lobby** — sides chosen, the bot posts the match lobby in the custom's channel
+9. **Lobby** — sides chosen, the bot posts the match lobby in the custom's channel
    with **Set party code** and **End custom** buttons. Any registered player can
    use them; setting the code updates the lobby embed in place.
-11. **End** — ending marks the match completed and deletes the custom's team VCs
+10. **End** — ending marks the match completed and deletes the custom's team VCs
    **and** its text channel.
-12. **Delete/prune guard** — teardown is blocked while **both** team VCs are
+11. **Delete/prune guard** — teardown is blocked while **both** team VCs are
    occupied (game in progress). Superadmin can `force`, which disconnects
    members first.
 
@@ -128,9 +136,9 @@ DISCORD_TOKEN=x DB_PATH=/tmp/t.db pytest -q
 
 **Fully wired:** identity/registration, customs (create + dedicated channel),
 overlap scheduling, queue fill, ownership + transfer (embed redraw + owner DM),
-delete/prune with the occupancy guard, captain selection, coin toss for pick
-order, snake **or** one-by-one draft, BO1/3/5 veto, attack/defence side pick,
-team-VC creation + one-time auto-move, party code (open to all), player bans,
+delete/prune with the occupancy guard, captain selection, coin toss for Team
+A/B, snake **or** one-by-one draft, the official BO1/3/5 map selection with a
+side pick per map, team-VC creation + one-time auto-move, party code (open to all), player bans,
 maps incl. the competitive pool, roles/permissions, audit log, the three live
 control boards, the ready check (auto on full, drop-and-refill on failure), Docker.
 

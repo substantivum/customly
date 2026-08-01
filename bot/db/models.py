@@ -196,6 +196,23 @@ class MapVeto(Base):
     map_name: Mapped[str] = mapped_column(String(32))
 
 
+class MatchMapSide(Base):
+    """Attack/defence per played map, in the order the maps are played.
+
+    Its own table rather than columns on `map_veto`: a side is chosen for a
+    *map*, not for a veto step, and the number of them varies with the format.
+    `Match.side_pick` still holds the decider's, for matches recorded before
+    sides were tracked per map.
+    """
+
+    __tablename__ = "match_map_sides"
+    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    map_index: Mapped[int] = mapped_column(Integer, primary_key=True)   # 1-based
+    map_name: Mapped[str] = mapped_column(String(32))
+    team_side: Mapped[str] = mapped_column(String(1))      # A|B — who chose
+    choice: Mapped[str] = mapped_column(String(8))         # attack|defence
+
+
 class MatchResult(Base):
     __tablename__ = "match_results"
     match_id: Mapped[int] = mapped_column(Integer, primary_key=True)

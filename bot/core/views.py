@@ -294,13 +294,13 @@ class ReadyCheckView(_TimedView):
 
 
 class CoinflipView(_TimedView):
-    """Heads/tails, then first-or-second pick. Only the captain on the clock can
+    """Heads/tails, then Team A or Team B. Only the captain on the clock can
     click; the timer decides for them if they don't."""
 
     def __init__(self, controller, on_done):
         super().__init__()
         self.c = controller
-        self.on_done = on_done          # async (first_side: str) -> None
+        self.on_done = on_done          # async (controller) -> None
         self.SECONDS = settings.draft_pick_seconds
         self._render()
 
@@ -309,29 +309,30 @@ class CoinflipView(_TimedView):
         if self.c.stage == "call":
             self.add_item(self._Choice("Heads", "heads", "🪙"))
             self.add_item(self._Choice("Tails", "tails", "🌙"))
-        elif self.c.stage == "order":
-            self.add_item(self._Choice("First pick", "first", "1️⃣"))
-            self.add_item(self._Choice("Second pick", "second", "2️⃣"))
+        elif self.c.stage == "letter":
+            self.add_item(self._Choice("Team A", "A", "🟥"))
+            self.add_item(self._Choice("Team B", "B", "🟦"))
 
     async def _apply(self, value: str, *, itx, auto: bool):
         if self.c.stage == "call":
             self.c.flip(value, auto=auto)
-        elif self.c.stage == "order":
-            self.c.choose_order(value, auto=auto)
+        elif self.c.stage == "letter":
+            self.c.choose_letter(value, auto=auto)
         self._render()
         done = self.c.done
         await self._redraw(self.c.embed(), itx=itx, view=None if done else self)
         if done:
             self._cancel()
             self.stop()
-            await self.on_done(self.c.first_side)
+            # the captains may have swapped letters — hand the controller back
+            await self.on_done(self.c)
         else:
             self.arm()
 
     async def on_timeout_step(self):
         if self.c.done:
             return
-        value = self.c.random_call() if self.c.stage == "call" else self.c.random_order()
+        value = self.c.random_call() if self.c.stage == "call" else self.c.random_letter()
         await self._apply(value, itx=None, auto=True)
 
     class _Choice(discord.ui.Button):
@@ -348,70 +349,10 @@ class CoinflipView(_TimedView):
             await view._apply(self.value, itx=itx, auto=False)
 
 
-class SidePickView(_TimedView):
-    """Attack or defence on the decider map, for the team that didn't ban it
-    away. Auto-picks at random if that captain stalls."""
-
-    def __init__(self, match_id: int, side: str, captain_id: int,
-                 map_name: str | None, on_done):
-        super().__init__()
-        self.match_id = match_id
-        self.side = side
-        self.captain_id = captain_id
-        self.map_name = map_name
-        self.on_done = on_done          # async (choice: str, auto: bool) -> None
-        self.choice: str | None = None
-        self.SECONDS = settings.veto_pick_seconds
-        self.add_item(self._Choice("Attack", "attack", "🔫"))
-        self.add_item(self._Choice("Defence", "defence", "🛡"))
-
-    def embed(self) -> discord.Embed:
-        e = discord.Embed(title=f"🎯 Side Choice — Match #{self.match_id}", color=VAL_RED)
-        e.add_field(name="Map", value=self.map_name or "—", inline=True)
-        if self.choice:
-            e.add_field(
-                name="Chosen",
-                value=f"Team {self.side} starts **{self.choice.title()}**",
-                inline=False,
-            )
-        else:
-            e.add_field(
-                name="Waiting on",
-                value=f"<@{self.captain_id}> (Team {self.side}) — they didn't ban last, "
-                      f"so they pick the side",
-                inline=False,
-            )
-        return e
-
-    async def _apply(self, choice: str, *, itx, auto: bool):
-        self.choice = choice
-        self._cancel()
-        self.stop()
-        await self._redraw(self.embed(), itx=itx, view=None)
-        await self.on_done(choice, auto)
-
-    async def on_timeout_step(self):
-        if self.choice:
-            return
-        await self._apply(random.choice(("attack", "defence")), itx=None, auto=True)
-
-    class _Choice(discord.ui.Button):
-        def __init__(self, label: str, value: str, emoji: str):
-            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
-            self.value = value
-
-        async def callback(self, itx: discord.Interaction):
-            view: "SidePickView" = self.view
-            if itx.user.id != view.captain_id:
-                return await itx.response.send_message(
-                    "Only the team that didn't ban last picks the side.", ephemeral=True
-                )
-            await view._apply(self.value, itx=itx, auto=False)
-
-
 class VetoView(_TimedView):
-    """One button per remaining map; the active side bans/picks on their turn.
-    A per-turn timer auto-picks a random remaining map if the captain stalls."""
+    """Drives the whole map selection on one message: map buttons on a ban/pick
+    step, Attack/Defence on a side step. The captain on the clock is the only
+    one who can click, and a per-turn timer decides at random if they stall."""
 
     def __init__(self, controller: "VetoController"):
         super().__init__()
@@ -422,13 +363,21 @@ class VetoView(_TimedView):
 
     def _render(self):
         self.clear_items()
+        cur = self.c.current
+        if cur is not None and cur.action == "side":
+            self.add_item(self._SideButton("Attack", "attack", "🔫"))
+            self.add_item(self._SideButton("Defence", "defence", "🛡"))
+            return
         for m in self.c.remaining:
             self.add_item(self._MapButton(m))
 
     async def on_timeout_step(self):
         if self.c.done:
             return
-        done = self.c.auto_pick_map()
+        done = (
+            self.c.auto_pick_side() if self.c.current.action == "side"
+            else self.c.auto_pick_map()
+        )
         self._render()
         await self._update(done, itx=None, auto=True)
 
@@ -460,6 +409,21 @@ class VetoView(_TimedView):
                     "Not your turn to ban/pick.", ephemeral=True
                 )
             done = view.c.apply(self.map_name)
+            view._render()
+            await view._update(done, itx=itx, auto=False)
+
+    class _SideButton(discord.ui.Button):
+        def __init__(self, label: str, choice: str, emoji: str):
+            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
+            self.choice = choice
+
+        async def callback(self, itx: discord.Interaction):
+            view: "VetoView" = self.view  # capture BEFORE _render detaches this button
+            if itx.user.id != view.c.captain_for_turn():
+                return await itx.response.send_message(
+                    "Not your side to pick.", ephemeral=True
+                )
+            done = view.c.apply_side(self.choice)
             view._render()
             await view._update(done, itx=itx, auto=False)
 

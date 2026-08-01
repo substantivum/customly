@@ -7,7 +7,7 @@ from bot.core.actions import channel_slug, parse_start
 from bot.core.naming import team_vc_name
 from bot.services.custom import _overlaps
 from bot.services.draft import alternate_order, pick_order, snake_order
-from bot.services.veto import MIN_POOL, veto_plan
+from bot.services.veto import check_pool, veto_plan
 
 
 def _t(h):
@@ -56,58 +56,71 @@ def test_pick_order_rejects_unknown_mode():
         pick_order("auction", 4)
 
 
-def test_veto_bo1_alternates_to_one():
-    plan = veto_plan("BO1", 7)
-    bans = [s for s in plan if s.action == "ban"]
-    assert len(bans) == 6
-    assert plan[-1].action == "decider"
+def _steps(fmt: str, pool_size: int) -> list[tuple[str, str | None]]:
+    return [(s.action, s.side) for s in veto_plan(fmt, pool_size)]
 
 
-def test_veto_bo3_shape():
-    plan = veto_plan("BO3", 7)
-    actions = [s.action for s in plan]
-    assert actions[:4] == ["ban", "ban", "pick", "pick"]
-    assert actions[-1] == "decider"
+def test_veto_bo1_follows_the_official_sequence():
+    """Team A bans first, alternating to map 7, then Team A picks side."""
+    assert _steps("BO1", 7) == [
+        ("ban", "A"), ("ban", "B"),
+        ("ban", "A"), ("ban", "B"),
+        ("ban", "A"), ("ban", "B"),
+        ("decider", None), ("side", "A"),
+    ]
 
 
-def _run_veto(fmt: str, pool_size: int) -> list[str]:
-    """Mirror VetoController.apply(): consume the pool step by step, including
-    its auto-resolve of a trailing decider. Returns the maps that get played."""
-    plan = veto_plan(fmt, pool_size)
-    remaining = [f"m{i}" for i in range(pool_size)]
-    picked: list[str] = []
-    step = 0
-    while step < len(plan):
-        assert remaining, f"{fmt}/{pool_size}: pool exhausted at step {step}"
-        if plan[step].action == "decider":
-            assert len(remaining) == 1, (
-                f"{fmt}/{pool_size}: stalled on the decider with "
-                f"{len(remaining)} maps left and no captain on the clock"
-            )
-            picked.append(remaining.pop())
-            step += 1
-            continue
-        chosen = remaining.pop(0)
-        if plan[step].action == "pick":
-            picked.append(chosen)
-        step += 1
-        if step < len(plan) and plan[step].action == "decider" and len(remaining) == 1:
-            picked.append(remaining.pop())
-            step += 1
-    assert not remaining
-    return picked
+def test_veto_bo3_follows_the_official_sequence():
+    """Each picked map's side goes to the team that did not pick it; the
+    decider's goes to Team A, who did not ban last."""
+    assert _steps("BO3", 7) == [
+        ("ban", "A"), ("ban", "B"),
+        ("pick", "A"), ("side", "B"),
+        ("pick", "B"), ("side", "A"),
+        ("ban", "A"), ("ban", "B"),
+        ("decider", None), ("side", "A"),
+    ]
 
 
-@pytest.mark.parametrize("fmt,maps_played", [("BO1", 1), ("BO3", 3), ("BO5", 5)])
+def test_veto_bo5_follows_the_official_sequence():
+    """No bans after the picks, so the decider's side falls to Team B — the
+    team that did not choose the side on map 4."""
+    assert _steps("BO5", 7) == [
+        ("ban", "A"), ("ban", "B"),
+        ("pick", "A"), ("side", "B"),
+        ("pick", "B"), ("side", "A"),
+        ("pick", "A"), ("side", "B"),
+        ("pick", "B"), ("side", "A"),
+        ("decider", None), ("side", "B"),
+    ]
+
+
+@pytest.mark.parametrize("fmt", ["BO3", "BO5"])
+@pytest.mark.parametrize("pool_size", [2, 5, 6, 8, 10])
+def test_bo3_and_bo5_need_exactly_the_competitive_seven(fmt, pool_size):
+    """The published sequences are written for a 7-map pool; anything else
+    would need invented steps."""
+    with pytest.raises(ValueError):
+        veto_plan(fmt, pool_size)
+    with pytest.raises(ValueError):
+        check_pool(fmt, pool_size)
+    check_pool(fmt, 7)
+
+
 @pytest.mark.parametrize("pool_size", range(2, 13))
-def test_veto_consumes_any_pool_size(fmt, maps_played, pool_size):
-    """Regression: BO5 used to be hard-coded to exactly 7 maps, so the seeded
-    10-map pool stalled forever on a decider nobody could click."""
-    if pool_size < MIN_POOL[fmt]:
-        with pytest.raises(ValueError):
-            veto_plan(fmt, pool_size)
-        return
-    assert len(_run_veto(fmt, pool_size)) == maps_played
+def test_veto_bo1_bans_any_pool_down_to_one_map(pool_size):
+    """BO1 isn't tied to 7: a smaller or larger pool still alternates to one."""
+    plan = veto_plan("BO1", pool_size)
+    assert [s.action for s in plan].count("ban") == pool_size - 1
+    assert (plan[-2].action, plan[-1].action) == ("decider", "side")
+    bans = [s.side for s in plan if s.action == "ban"]
+    assert bans == ["A" if i % 2 == 0 else "B" for i in range(len(bans))]
+    assert plan[-1].side != bans[-1]     # the last banner doesn't pick the side
+
+
+def test_bo1_rejects_a_pool_too_small_to_veto():
+    with pytest.raises(ValueError):
+        veto_plan("BO1", 1)
 
 
 # --------------------------------------------------------------- roster ------
@@ -198,40 +211,80 @@ def test_coinflip_winner_is_whoever_called_right():
         face = c.flip("heads")
         called_right = face == "heads"
         assert (c.winner_side == c.caller_side) is called_right
-        # the toss winner is the one who now chooses first/second pick
+        # the toss winner is the one who now chooses their letter
         assert c.actor_id() == c.captain(c.winner_side)
 
 
-@pytest.mark.parametrize("choice", ["first", "second"])
-def test_coinflip_order_choice(choice):
+@pytest.mark.parametrize("choice", ["A", "B"])
+def test_coinflip_winner_takes_the_letter_they_chose(choice):
+    """The toss buys the choice of letter; Team A opens the draft and the veto,
+    so taking B is a real trade."""
     from bot.core.controllers import CoinflipController
 
     c = CoinflipController(1, 111, 222)
     c.flip("tails")
-    first = c.choose_order(choice)
-    assert (first == c.winner_side) is (choice == "first")
-    assert c.done and c.first_side == first
+    won = c.captain(c.winner_side)
+    lost = c.captain(other := ("B" if c.winner_side == "A" else "A"))
+    assert c.choose_letter(choice) == choice
+    assert c.captain(choice) == won
+    assert c.captain("B" if choice == "A" else "A") == lost
+    assert c.winner_side == choice           # labels follow the choice
+    assert c.done and c.first_side == "A"    # Team A always opens the draft
+    assert other in ("A", "B")
 
 
 # --------------------------------------------------------- side selection ----
 def _drive_veto(fmt: str, pool_size: int):
-    """Run a whole veto by always taking the first remaining map."""
+    """Run a whole veto: always take the first remaining map, always attack."""
     from bot.core.controllers import VetoController
 
     ctl = VetoController(7, fmt, [f"m{i}" for i in range(pool_size)], 111, 222)
     while not ctl.done:
-        ctl.apply(ctl.remaining[0])
+        if ctl.current.action == "side":
+            ctl.apply_side("attack")
+        else:
+            ctl.apply(ctl.remaining[0])
     return ctl
 
 
-@pytest.mark.parametrize("fmt,pool_size", [("BO1", 7), ("BO1", 2), ("BO3", 7), ("BO5", 9)])
-def test_side_choice_goes_to_the_team_that_did_not_ban_last(fmt, pool_size):
+@pytest.mark.parametrize("fmt,pool_size", [("BO1", 7), ("BO1", 2), ("BO3", 7), ("BO5", 7)])
+def test_every_played_map_gets_its_own_side_pick(fmt, pool_size):
     ctl = _drive_veto(fmt, pool_size)
-    bans = [(side) for action, side, _ in ctl.history if action == "ban" and side]
+    assert [m for m, _side, _choice in ctl.sides] == ctl.picked_maps
+    assert all(choice == "attack" for _m, _side, choice in ctl.sides)
     assert ctl.decider_map == ctl.picked_maps[-1]
-    if bans:
-        assert ctl.side_choice_side != bans[-1]
-    assert ctl.side_choice_side in ("A", "B")
+
+
+@pytest.mark.parametrize("fmt", ["BO3", "BO5"])
+def test_the_team_that_picks_a_map_does_not_pick_its_side(fmt):
+    ctl = _drive_veto(fmt, 7)
+    pickers = [side for action, side, _m, _c in ctl.history if action == "pick"]
+    sides = [side for _m, side, _c in ctl.sides]
+    for picker, chooser in zip(pickers, sides):
+        assert chooser != picker
+
+
+def test_bo5_decider_side_goes_to_team_b():
+    """BO5 ends on picks, not bans, so the alternation leaves it with B."""
+    assert _drive_veto("BO5", 7).sides[-1][1] == "B"
+
+
+@pytest.mark.parametrize("fmt", ["BO1", "BO3", "BO5"])
+def test_a_veto_is_not_done_until_the_last_side_is_chosen(fmt):
+    """The decider auto-resolves once one map is left; the side after it still
+    needs a captain, so the flow must not walk off to the lobby early."""
+    from bot.core.controllers import VetoController
+
+    ctl = VetoController(7, fmt, [f"m{i}" for i in range(7)], 111, 222)
+    while ctl.current.action != "side" or ctl.remaining:
+        if ctl.current.action == "side":
+            ctl.apply_side("defence")
+        else:
+            ctl.apply(ctl.remaining[0])
+    assert not ctl.done                      # decider gone, final side pending
+    assert ctl.current_side_map == ctl.decider_map
+    assert ctl.apply_side("defence") is True
+    assert ctl.done
 
 
 # -------------------------------------------------------------- start times ---
