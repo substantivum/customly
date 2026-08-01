@@ -7,13 +7,14 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core import actions, audit
+from bot.core import actions, audit, board
 from bot.core.errors import BotError, PermissionDenied
 from bot.core.permissions import can_manage_custom, is_superadmin, require
 from bot.core.ui import reply
 from bot.db import SessionLocal
 from bot.db.models import Custom
 from bot.services import custom as custom_svc
+from bot.services import draft as draft_svc
 
 
 class CustomCog(commands.GroupCog, name="custom"):
@@ -28,16 +29,24 @@ class CustomCog(commands.GroupCog, name="custom"):
              "pool (optional — defaults to all enabled maps)",
         team_size="Players per side: 1 (1v1) … 5 (5v5). Default 5.",
         draft="How players are drafted: snake, or one by one. Default snake.",
+        captains="How captains are chosen when this custom starts. Default random.",
     )
-    @app_commands.choices(draft=[
-        app_commands.Choice(name="Snake (A, BB, AA, …)", value="snake"),
-        app_commands.Choice(name="One by one (A, B, A, B, …)", value="alternate"),
-    ])
+    @app_commands.choices(
+        draft=[
+            app_commands.Choice(name="Snake (A, BB, AA, …)", value="snake"),
+            app_commands.Choice(name="One by one (A, B, A, B, …)", value="alternate"),
+        ],
+        captains=[
+            app_commands.Choice(name=draft_svc.CAPTAIN_METHOD_LABEL[m], value=m)
+            for m in draft_svc.CREATE_METHODS
+        ],
+    )
     async def create(
         self, itx: discord.Interaction, name: str, format: str, start: str,
         maps: str = "",
         team_size: app_commands.Range[int, 1, 5] = 5,
         draft: app_commands.Choice[str] | None = None,
+        captains: app_commands.Choice[str] | None = None,
     ):
         if settings.custom_config_channel and itx.channel_id != settings.custom_config_channel:
             raise PermissionDenied("Use the dedicated #custom-config channel.")
@@ -46,6 +55,7 @@ class CustomCog(commands.GroupCog, name="custom"):
         c = await actions.create_custom_flow(
             itx, name=name, fmt=format, start_raw=start, maps_csv=maps,
             team_size=team_size, draft_mode=draft.value if draft else "snake",
+            captain_method=captains.value if captains else "random",
         )
         reg = itx.guild.get_channel(c.reg_channel)
         await reply(itx, f"Created **Custom #{c.custom_id}** ({c.team_size}v{c.team_size}) → "
@@ -53,13 +63,11 @@ class CustomCog(commands.GroupCog, name="custom"):
 
     @app_commands.command(description="Register for a custom by id.")
     async def register(self, itx: discord.Interaction, custom_id: int):
-        await custom_svc.register(custom_id, itx.user.id, itx.guild_id)
-        await reply(itx, f"Registered for Custom #{custom_id} ✅ — be in voice before ready check.")
+        await reply(itx, await actions.join_custom(itx.guild, custom_id, itx.user.id))
 
     @app_commands.command(description="Leave a custom by id.")
     async def leave(self, itx: discord.Interaction, custom_id: int):
-        await custom_svc.leave(custom_id, itx.user.id, itx.guild_id)
-        await reply(itx, f"Left Custom #{custom_id}.")
+        await reply(itx, await actions.leave_custom(itx.guild, custom_id, itx.user.id))
 
     @app_commands.command(description="List active customs.")
     async def list(self, itx: discord.Interaction):
@@ -98,8 +106,10 @@ class CustomCog(commands.GroupCog, name="custom"):
         if force and not await is_superadmin(itx.user):
             raise PermissionDenied("Only superadmin may force.")
         await itx.response.defer(ephemeral=True)
+        await actions.cancel_ready_check(custom_id, "🗑 Custom deleted.")
         await custom_svc.delete_custom(custom_id, itx.guild, force=force)
         await audit.log(itx.guild_id, itx.user.id, "custom_delete", str(custom_id), force=force)
+        board.schedule(itx.guild)
         await reply(itx, f"Deleted Custom #{custom_id}.")
 
     @app_commands.command(description="Delete ALL customs (superadmin).")
@@ -108,6 +118,7 @@ class CustomCog(commands.GroupCog, name="custom"):
         await itx.response.defer(ephemeral=True)
         deleted, skipped = await custom_svc.prune(itx.guild, force=force)
         await audit.log(itx.guild_id, itx.user.id, "custom_prune", meta=str(deleted))
+        board.schedule(itx.guild)
         msg = f"Pruned {deleted} custom(s)."
         if skipped:
             msg += f" Skipped (in progress): {', '.join(map(str, skipped))}."

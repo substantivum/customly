@@ -54,8 +54,16 @@ class ValBot(commands.Bot):
         self.add_dynamic_items(
             RegisterButton, LeaveButton, PartyCodeButton, EndCustomButton
         )
-        from bot.cogs.panel import ControlPanel
-        self.add_view(ControlPanel())  # persistent control board (survives restarts)
+        from bot.cogs.panel import AdminBoard, PlayerBoard, SuperBoard
+        # persistent control boards, one per tier (survive restarts)
+        for boardview in (PlayerBoard, AdminBoard, SuperBoard):
+            self.add_view(boardview())
+        # A ready check lives in memory; anything the last shutdown stranded in
+        # the `ready` state would otherwise refuse to start forever.
+        from bot.services.custom import clear_stale_ready_checks
+        stale = await clear_stale_ready_checks()
+        if stale:
+            log.info("Reset %d custom(s) stuck in a ready check: %s", len(stale), stale)
         for c in COGS:
             await self.load_extension(c)
         if settings.guild_id:

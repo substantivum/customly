@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 import discord
 from sqlalchemy import delete, select
@@ -25,7 +26,13 @@ from bot.db.models import (
 
 DURATION = {"BO1": 1, "BO3": 3, "BO5": 5}
 MIN_TEAM, MAX_TEAM = 1, 5  # 1v1 .. 5v5
-ACTIVE_STATES = ("registration", "full", "veto", "live")
+# `ready` = a ready check is on the clock; the game hasn't started yet, so the
+# custom is still very much active.
+ACTIVE_STATES = ("registration", "full", "ready", "veto", "live")
+# States in which someone may still sign up. During a ready check the seats are
+# by definition taken, so a new sign-up lands on the waitlist — which is exactly
+# who we want standing by if the check fails.
+OPEN_STATES = ("registration", "full", "ready")
 
 
 # --------------------------------------------------------------- creation ---
@@ -41,6 +48,7 @@ async def create_custom(
     config_chan: int | None,
     team_size: int = 5,
     draft_mode: str = "snake",
+    captain_method: str = "random",
 ) -> Custom:
     fmt = fmt.upper()
     if fmt not in DURATION:
@@ -50,6 +58,10 @@ async def create_custom(
     if draft_mode not in draft_svc.DRAFT_MODES:
         raise BotError(
             f"Draft mode must be one of: {', '.join(draft_svc.DRAFT_MODES)}."
+        )
+    if captain_method not in draft_svc.CREATE_METHODS:
+        raise BotError(
+            f"Captain method must be one of: {', '.join(draft_svc.CREATE_METHODS)}."
         )
     async with SessionLocal() as s:
         # current enabled pool (preserve original case for fallback)
@@ -93,6 +105,7 @@ async def create_custom(
             team_size=team_size,
             map_pool=json.dumps(chosen),
             draft_mode=draft_mode,
+            captain_method=captain_method,
             start_time=start_time,
             vc_category=vc_category,
             config_chan=config_chan,
@@ -150,12 +163,71 @@ async def get_in_guild(s, custom_id: int, guild_id: int | None) -> Custom:
     return c
 
 
-async def register(custom_id: int, user_id: int, guild_id: int | None = None) -> Custom:
+class Roster(NamedTuple):
+    """Who's playing, who's waiting, and how many seats there are."""
+
+    starters: list[int]
+    waitlist: list[int]
+    size: int
+
+    @property
+    def all(self) -> list[int]:
+        return [*self.starters, *self.waitlist]
+
+
+async def _ordered_members(s, custom_id: int) -> tuple[list[int], Queue | None]:
+    """Everyone signed up, in join order — the queue is the source of truth."""
+    q = (await s.execute(
+        select(Queue).where(Queue.custom_id == custom_id)
+    )).scalar_one_or_none()
+    if not q:
+        rows = await s.execute(
+            select(CustomRegistration.user_id)
+            .where(CustomRegistration.custom_id == custom_id)
+            .order_by(CustomRegistration.reg_at)
+        )
+        return [r[0] for r in rows.all()], None
+    rows = await s.execute(
+        select(QueueMember.user_id)
+        .where(QueueMember.queue_id == q.queue_id)
+        .order_by(QueueMember.joined_at)
+    )
+    return [r[0] for r in rows.all()], q
+
+
+async def roster(custom_id: int) -> Roster:
+    """Split the sign-ups into starters and waitlist at team_size × 2.
+
+    Nobody is turned away at registration: the first `size` to sign up are the
+    starters and everyone after them is a sub. Because the split is derived from
+    join order rather than stored, a leaver is replaced by the next in line
+    automatically — there is no promotion bookkeeping to get out of sync.
+    """
+    async with SessionLocal() as s:
+        c = await s.get(Custom, custom_id)
+        if not c:
+            return Roster([], [], 0)
+        ids, q = await _ordered_members(s, custom_id)
+    size = q.size if q else c.team_size * 2
+    return Roster(ids[:size], ids[size:], size)
+
+
+def _state_for(c: Custom, signed_up: int, size: int) -> None:
+    """Keep `full` in step with the roster, without closing registration —
+    a full custom still takes subs."""
+    if c.state in ("registration", "full"):
+        c.state = "full" if signed_up >= size else "registration"
+
+
+async def register(
+    custom_id: int, user_id: int, guild_id: int | None = None
+) -> tuple[Custom, int]:
+    """Sign up. Returns (custom, waitlist_position) — 0 when they're a starter."""
     async with SessionLocal() as s:
         c = await get_in_guild(s, custom_id, guild_id)
         if await _is_banned(c.guild_id, user_id):
             raise BotError("You are banned from joining games in this server.")
-        if c.state != "registration":
+        if c.state not in OPEN_STATES:
             raise BotError(f"Custom #{custom_id} is not open for registration.")
         clash = await find_conflict(s, user_id, c)
         if clash:
@@ -167,39 +239,61 @@ async def register(custom_id: int, user_id: int, guild_id: int | None = None) ->
         exists = await s.get(CustomRegistration, (custom_id, user_id))
         if exists:
             raise BotError("Already registered.")
+        ids, q = await _ordered_members(s, custom_id)
+        size = q.size if q else c.team_size * 2
         s.add(CustomRegistration(custom_id=custom_id, user_id=user_id))
-        # mirror into the queue
-        q = (await s.execute(select(Queue).where(Queue.custom_id == custom_id))).scalar_one()
-        s.add(QueueMember(queue_id=q.queue_id, user_id=user_id))
+        if q:  # mirror into the queue
+            s.add(QueueMember(queue_id=q.queue_id, user_id=user_id))
+        _state_for(c, len(ids) + 1, size)
         await s.commit()
         await s.refresh(c)
-        return c
+        # they went in last: seat len(ids), 0-based
+        return c, max(0, len(ids) - size + 1)
 
 
-async def leave(custom_id: int, user_id: int, guild_id: int | None = None) -> Custom:
+async def leave(
+    custom_id: int, user_id: int, guild_id: int | None = None
+) -> tuple[Custom, int | None]:
+    """Drop out. Returns (custom, promoted_user_id) — the first sub moves up
+    into the seat a starter vacated."""
     async with SessionLocal() as s:
         c = await get_in_guild(s, custom_id, guild_id)
+        ids, q = await _ordered_members(s, custom_id)
+        size = q.size if q else c.team_size * 2
+        promoted = None
+        if user_id in ids:
+            if ids.index(user_id) < size and len(ids) > size:
+                promoted = ids[size]
+            ids.remove(user_id)
         reg = await s.get(CustomRegistration, (custom_id, user_id))
         if reg:
             await s.delete(reg)
-        q = (await s.execute(select(Queue).where(Queue.custom_id == custom_id))).scalar_one_or_none()
         if q:
             qm = await s.get(QueueMember, (q.queue_id, user_id))
             if qm:
                 await s.delete(qm)
+        _state_for(c, len(ids), size)
         await s.commit()
         await s.refresh(c)
-        return c
+        return c, promoted
 
 
-async def registrants(custom_id: int) -> list[int]:
+async def clear_stale_ready_checks() -> list[int]:
+    """Un-stick customs left in `ready` by a restart.
+
+    The ready-check view lives in memory, so a bot that goes down mid-check takes
+    the clock with it. Without this the custom would sit in `ready` forever,
+    refusing to start. Called once on boot; returns the ids it reset.
+    """
     async with SessionLocal() as s:
-        rows = await s.execute(
-            select(CustomRegistration.user_id).where(
-                CustomRegistration.custom_id == custom_id
-            )
-        )
-        return [r[0] for r in rows.all()]
+        rows = await s.execute(select(Custom).where(Custom.state == "ready"))
+        stuck = [r[0] for r in rows.all()]
+        for c in stuck:
+            ids, q = await _ordered_members(s, c.custom_id)
+            size = q.size if q else c.team_size * 2
+            c.state = "full" if len(ids) >= size else "registration"
+        await s.commit()
+    return [c.custom_id for c in stuck]
 
 
 # -------------------------------------------------------------- ownership ---

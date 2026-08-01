@@ -110,6 +110,38 @@ def test_veto_consumes_any_pool_size(fmt, maps_played, pool_size):
     assert len(_run_veto(fmt, pool_size)) == maps_played
 
 
+# --------------------------------------------------------------- roster ------
+def _split(ids: list[int], size: int) -> tuple[list[int], list[int]]:
+    """The rule custom_svc.roster applies: join order, cut at the seat count."""
+    return ids[:size], ids[size:]
+
+
+def test_roster_caps_the_game_at_the_team_size():
+    """A 3v3 has 6 seats; a 7th sign-up is a sub, not a 4th player on a side."""
+    starters, waitlist = _split(list(range(1, 8)), 3 * 2)
+    assert starters == [1, 2, 3, 4, 5, 6]
+    assert waitlist == [7]
+
+
+def test_waitlist_promotes_in_join_order():
+    """Deriving the split from join order means a leaver is replaced with no
+    promotion bookkeeping: whoever is next simply becomes a starter."""
+    ids, size = [1, 2, 3, 4, 5, 6, 7, 8], 6
+    starters, waitlist = _split(ids, size)
+    assert waitlist == [7, 8]
+    ids.remove(3)                       # a starter drops out
+    starters, waitlist = _split(ids, size)
+    assert starters == [1, 2, 4, 5, 6, 7]   # 7 moved up
+    assert waitlist == [8]
+
+
+def test_waitlist_leaver_does_not_promote_anyone():
+    ids, size = [1, 2, 3, 4, 5, 6, 7], 6
+    ids.remove(7)                       # a sub drops out
+    starters, waitlist = _split(ids, size)
+    assert starters == [1, 2, 3, 4, 5, 6] and waitlist == []
+
+
 # ------------------------------------------------------------ channel names ---
 @pytest.mark.parametrize(
     "creator,name,expected",
@@ -226,3 +258,84 @@ def test_parse_start_rejects_garbage():
 
     with pytest.raises(BotError):
         parse_start("not a time")
+
+
+# ------------------------------------------------------------- ready check ---
+def _check(starters, round_no=1):
+    from datetime import timedelta
+
+    from bot.core.controllers import ReadyCheckController
+
+    return ReadyCheckController(
+        1, "Friday 5v5", starters,
+        datetime.now(timezone.utc) + timedelta(seconds=120), round_no,
+    )
+
+
+def test_ready_check_starts_with_nobody_answered():
+    c = _check([1, 2, 3, 4])
+    assert c.missing == [1, 2, 3, 4]
+    assert not c.all_answered and not c.everyone_ready
+    assert c.absent == [1, 2, 3, 4]
+
+
+def test_ready_check_resolves_once_everyone_has_answered():
+    """A decline is an answer — the check shouldn't sit out the clock for it."""
+    c = _check([1, 2])
+    c.mark(1, True)
+    assert not c.all_answered
+    c.mark(2, False)
+    assert c.all_answered and not c.everyone_ready
+    assert c.absent == [2]
+
+
+def test_ready_check_passes_only_when_every_starter_is_ready():
+    c = _check([1, 2, 3])
+    for u in (1, 2, 3):
+        assert not c.everyone_ready
+        c.mark(u, True)
+    assert c.everyone_ready and c.absent == []
+
+
+def test_ready_check_lets_a_player_change_their_mind():
+    c = _check([1, 2])
+    c.mark(1, False)
+    assert c.absent == [1, 2]
+    c.mark(1, True)                 # "actually I can play"
+    assert c.declined == set() and c.ready == {1}
+    assert c.absent == [2]
+
+
+def test_ready_check_absent_covers_both_silence_and_refusal():
+    c = _check([1, 2, 3, 4])
+    c.mark(1, True)
+    c.mark(2, False)                # refused
+    assert set(c.absent) == {2, 3, 4}   # 3 and 4 never answered
+    assert c.missing == [3, 4]
+
+
+def test_ready_check_ignores_people_who_are_not_playing():
+    c = _check([1, 2])
+    assert c.is_starter(1) and not c.is_starter(99)
+
+
+# ------------------------------------------------------- captain selection ---
+def test_captain_method_choices_exclude_manual():
+    """`manual` names two players, so it can't be fixed before anyone signs up."""
+    from bot.services.draft import CAPTAIN_METHOD_LABEL, CREATE_METHODS
+
+    assert "manual" not in CREATE_METHODS
+    assert all(m in CAPTAIN_METHOD_LABEL for m in CREATE_METHODS)
+
+
+def test_choose_captains_by_rr_and_peak():
+    from bot.services.draft import choose_captains
+
+    players = [
+        {"user_id": 1, "cur_rr": 10, "peak_rank": "Iron 1"},
+        {"user_id": 2, "cur_rr": 90, "peak_rank": "Gold 3"},
+        {"user_id": 3, "cur_rr": 50, "peak_rank": "Radiant"},
+    ]
+    assert set(choose_captains("highest_rr", players)) == {2, 3}
+    assert set(choose_captains("highest_peak", players)) == {3, 2}
+    assert len(set(choose_captains("random", players))) == 2

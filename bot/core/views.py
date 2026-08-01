@@ -5,28 +5,10 @@ import asyncio
 import random
 
 import discord
-from sqlalchemy import select
 
 from bot.config import settings
-from bot.core.embeds import VAL_RED, custom_registration_embed
+from bot.core.embeds import VAL_RED
 from bot.core.errors import BotError
-from bot.services import custom as custom_svc
-
-
-async def _refresh_registration(itx: discord.Interaction, custom_id: int) -> None:
-    from bot.db import SessionLocal
-    from bot.db.models import Custom, Queue
-
-    async with SessionLocal() as s:
-        c = await s.get(Custom, custom_id)
-        q = (await s.execute(
-            select(Queue).where(Queue.custom_id == custom_id)
-        )).scalar_one_or_none()
-    if not c:
-        return
-    size = q.size if q else c.team_size * 2
-    regs = await custom_svc.registrants(custom_id)
-    await itx.message.edit(embed=custom_registration_embed(c, regs, size))
 
 
 class RegisterButton(
@@ -49,14 +31,16 @@ class RegisterButton(
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
+        from bot.core import actions
+
+        await itx.response.defer(ephemeral=True)
         try:
-            await custom_svc.register(self.cid, itx.user.id, itx.guild_id)
+            msg = await actions.join_custom(
+                itx.guild, self.cid, itx.user.id, itx.message
+            )
         except BotError as e:
-            return await itx.response.send_message(str(e), ephemeral=True)
-        await itx.response.send_message(
-            "Registered ✅ — be in voice before the ready check.", ephemeral=True
-        )
-        await _refresh_registration(itx, self.cid)
+            return await itx.followup.send(str(e), ephemeral=True)
+        await itx.followup.send(msg, ephemeral=True)
 
 
 class LeaveButton(
@@ -77,12 +61,16 @@ class LeaveButton(
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
+        from bot.core import actions
+
+        await itx.response.defer(ephemeral=True)
         try:
-            await custom_svc.leave(self.cid, itx.user.id, itx.guild_id)
+            msg = await actions.leave_custom(
+                itx.guild, self.cid, itx.user.id, itx.message
+            )
         except BotError as e:
-            return await itx.response.send_message(str(e), ephemeral=True)
-        await itx.response.send_message("You left the custom.", ephemeral=True)
-        await _refresh_registration(itx, self.cid)
+            return await itx.followup.send(str(e), ephemeral=True)
+        await itx.followup.send(msg, ephemeral=True)
 
 
 def registration_view(custom_id: int) -> discord.ui.View:
@@ -243,6 +231,63 @@ class _TimedView(discord.ui.View):
                 await self.message.edit(embed=embed, view=view)
             except discord.HTTPException:
                 pass
+
+
+class ReadyCheckView(_TimedView):
+    """✅ / ❌ for every starter, on one message in the custom's channel.
+
+    Resolves early the moment everyone has answered — waiting out a two-minute
+    clock when the answer is already known just annoys the people who did click.
+    """
+
+    def __init__(self, controller, on_resolve):
+        super().__init__()
+        self.c = controller
+        self.on_resolve = on_resolve    # async (timed_out: bool) -> None
+        self.SECONDS = settings.ready_check_seconds
+        self._resolved = False
+        self.add_item(self._Answer("Ready", True, discord.ButtonStyle.success, "✅"))
+        self.add_item(self._Answer("Can't play", False, discord.ButtonStyle.danger, "❌"))
+
+    async def _apply(self, user_id: int, ok: bool, *, itx):
+        self.c.mark(user_id, ok)
+        if self.c.all_answered:
+            return await self._finish(itx=itx, timed_out=False)
+        await self._redraw(self.c.embed(), itx=itx, view=self)
+
+    async def _finish(self, *, itx, timed_out: bool):
+        if self._resolved:
+            return
+        self._resolved = True
+        self._cancel()
+        self.stop()
+        await self._redraw(self.c.embed(outcome="Resolving…"), itx=itx, view=None)
+        await self.on_resolve(timed_out)
+
+    async def on_timeout_step(self):
+        await self._finish(itx=None, timed_out=True)
+
+    async def cancel(self, note: str) -> None:
+        """Called off from outside — a manual start, or the custom going away."""
+        if self._resolved:
+            return
+        self._resolved = True
+        self._cancel()
+        self.stop()
+        await self._redraw(self.c.embed(outcome=note), itx=None, view=None)
+
+    class _Answer(discord.ui.Button):
+        def __init__(self, label: str, ok: bool, style, emoji: str):
+            super().__init__(label=label, style=style, emoji=emoji)
+            self.ok = ok
+
+        async def callback(self, itx: discord.Interaction):
+            view: "ReadyCheckView" = self.view
+            if not view.c.is_starter(itx.user.id):
+                return await itx.response.send_message(
+                    "You're not one of the starters for this game.", ephemeral=True
+                )
+            await view._apply(itx.user.id, self.ok, itx=itx)
 
 
 class CoinflipView(_TimedView):

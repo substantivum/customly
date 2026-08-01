@@ -3,6 +3,7 @@ match_id; key outcomes persisted to SQLite so a restart can recover results."""
 from __future__ import annotations
 
 import random
+from datetime import datetime
 
 import discord
 from sqlalchemy import select
@@ -121,6 +122,88 @@ class CoinflipController:
                       + (" _(auto)_" if self.auto else ""),
                 inline=False,
             )
+        return e
+
+
+class ReadyCheckController:
+    """Attendance check before a custom starts.
+
+    Every starter has to say ✅ before the match flow begins — a Valorant custom
+    needs both teams full, and a player drafted onto a team who never turns up
+    ruins the game for nine other people.
+
+    `❌ Can't play` is an *answer*, not a refusal to answer: once every seat has
+    given one the check resolves immediately rather than sitting out the clock.
+    """
+
+    def __init__(self, custom_id: int, name: str, starters: list[int],
+                 deadline: datetime, round_no: int = 1):
+        self.custom_id = custom_id
+        self.name = name
+        self.starters = list(starters)
+        self.deadline = deadline
+        self.round_no = round_no
+        self.ready: set[int] = set()
+        self.declined: set[int] = set()
+
+    # ------------------------------------------------------------- state ----
+    def mark(self, user_id: int, ok: bool) -> None:
+        (self.declined if ok else self.ready).discard(user_id)
+        (self.ready if ok else self.declined).add(user_id)
+
+    def is_starter(self, user_id: int) -> bool:
+        return user_id in self.starters
+
+    @property
+    def missing(self) -> list[int]:
+        """Signed up, but hasn't answered either way."""
+        answered = self.ready | self.declined
+        return [u for u in self.starters if u not in answered]
+
+    @property
+    def everyone_ready(self) -> bool:
+        return len(self.ready) == len(self.starters)
+
+    @property
+    def all_answered(self) -> bool:
+        return not self.missing
+
+    @property
+    def absent(self) -> list[int]:
+        """Who loses their seat if the check resolves now."""
+        return [u for u in self.starters if u not in self.ready]
+
+    def mentions(self) -> str:
+        return " ".join(f"<@{u}>" for u in self.starters)
+
+    # ------------------------------------------------------------ display ---
+    def _roster_lines(self) -> str:
+        def mark(u: int) -> str:
+            if u in self.ready:
+                return "✅"
+            return "❌" if u in self.declined else "⬜"
+
+        return "\n".join(f"{mark(u)} <@{u}>" for u in self.starters) or "_nobody_"
+
+    def embed(self, *, outcome: str | None = None) -> discord.Embed:
+        e = discord.Embed(
+            title=f"🔔 Ready check — Custom #{self.custom_id} · {self.name}",
+            description=(
+                outcome or
+                f"Everyone below has to be ready before the match starts.\n"
+                f"Closes {discord.utils.format_dt(self.deadline, 'R')}."
+            ),
+            color=VAL_RED,
+        )
+        if self.round_no > 1:
+            e.title += f" (round {self.round_no})"
+        e.add_field(
+            name=f"Ready {len(self.ready)}/{len(self.starters)}",
+            value=self._roster_lines(),
+            inline=False,
+        )
+        if outcome is None:
+            e.set_footer(text="❌ Can't play frees your seat for a sub straight away.")
         return e
 
 

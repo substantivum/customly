@@ -11,8 +11,20 @@ from bot.core.errors import BotError, PermissionDenied
 from bot.core.permissions import is_admin
 from bot.core.ui import reply
 from bot.db import SessionLocal
+from bot.services import draft as draft_svc
 
+# Overrides for `/match start`. The custom already carries a captain method
+# chosen at creation; these are here for the one-off ("actually, let's have X and
+# Y captain this one") that a stored setting can't express.
 CAPTAIN_METHODS = ["random", "manual", "highest_rr", "highest_peak"]
+
+_CAPTAIN_CHOICES = [
+    app_commands.Choice(name=draft_svc.CAPTAIN_METHOD_LABEL.get(m, m), value=m)
+    for m in CAPTAIN_METHODS
+]
+_CAPTAIN_DESC = (
+    "Override the custom's captain method just for this start (optional)"
+)
 
 
 class MatchCog(commands.GroupCog, name="match"):
@@ -21,39 +33,54 @@ class MatchCog(commands.GroupCog, name="match"):
 
     @app_commands.command(description="Start a full custom: captains → draft → veto.")
     @app_commands.describe(
-        custom_id="Custom to start", captains="How captains are chosen",
+        custom_id="Custom to start", captains=_CAPTAIN_DESC,
         captain_a="(manual only) Team A captain", captain_b="(manual only) Team B captain",
     )
-    @app_commands.choices(
-        captains=[app_commands.Choice(name=m, value=m) for m in CAPTAIN_METHODS]
-    )
+    @app_commands.choices(captains=_CAPTAIN_CHOICES)
     async def start(
         self, itx: discord.Interaction, custom_id: int,
         captains: app_commands.Choice[str] | None = None,
         captain_a: discord.Member | None = None,
         captain_b: discord.Member | None = None,
     ):
-        method = captains.value if captains else "random"
-        await actions.start_match(itx, custom_id, method, captain_a, captain_b, allow_partial=False)
+        await actions.start_match(itx, custom_id, captains.value if captains else None,
+                                  captain_a, captain_b, allow_partial=False)
 
     @app_commands.command(
         description="Manual start: begin with the currently registered players."
     )
     @app_commands.describe(
-        custom_id="Custom to start", captains="How captains are chosen",
+        custom_id="Custom to start", captains=_CAPTAIN_DESC,
         captain_a="(manual only) Team A captain", captain_b="(manual only) Team B captain",
     )
-    @app_commands.choices(
-        captains=[app_commands.Choice(name=m, value=m) for m in CAPTAIN_METHODS]
-    )
+    @app_commands.choices(captains=_CAPTAIN_CHOICES)
     async def forcestart(
         self, itx: discord.Interaction, custom_id: int,
         captains: app_commands.Choice[str] | None = None,
         captain_a: discord.Member | None = None,
         captain_b: discord.Member | None = None,
     ):
-        method = captains.value if captains else "random"
-        await actions.start_match(itx, custom_id, method, captain_a, captain_b, allow_partial=True)
+        await actions.start_match(itx, custom_id, captains.value if captains else None,
+                                  captain_a, captain_b, allow_partial=True)
+
+    @app_commands.command(
+        description="Post a ready check: every starter has to confirm before the match runs."
+    )
+    @app_commands.describe(custom_id="Custom to run the check on")
+    async def readycheck(self, itx: discord.Interaction, custom_id: int):
+        from bot.core.permissions import can_manage_custom
+        from bot.db.models import Custom
+
+        async with SessionLocal() as s:
+            c = await s.get(Custom, custom_id)
+        if not c or c.guild_id != itx.guild_id:
+            raise BotError("Custom not found.")
+        if not await can_manage_custom(c, itx.user):
+            raise PermissionDenied("Only the owner or a superadmin can do that.")
+        await itx.response.defer(ephemeral=True)
+        await reply(itx, await actions.start_ready_check(
+            itx.guild, custom_id, actor_id=itx.user.id
+        ))
 
     @app_commands.command(description="Report a map result (captain or admin).")
     async def result(

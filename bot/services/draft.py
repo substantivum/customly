@@ -53,6 +53,27 @@ def choose_captains(
     raise BotError(f"Unknown captain method: {method}")
 
 
+# Methods that can be fixed when a custom is created. `manual` is missing on
+# purpose: it names two specific players, and at creation nobody has signed up
+# yet — it stays an override on `/match start`.
+CREATE_METHODS = ("random", "highest_rr", "highest_peak")
+
+CAPTAIN_METHOD_LABEL = {
+    "random": "🎲 Random",
+    "highest_rr": "📈 Highest RR",
+    "highest_peak": "🏔 Highest peak rank",
+    "manual": "✍️ Manually chosen",
+    "volunteer": "🙋 Volunteers",
+    "vote": "🗳 Voted",
+}
+
+CAPTAIN_METHOD_HELP = {
+    "random": "two random players from the lobby",
+    "highest_rr": "the two highest current RR — needs profiles filled in",
+    "highest_peak": "the two highest peak ranks — needs profiles filled in",
+}
+
+
 def _other(side: str) -> str:
     return "B" if side == "A" else "A"
 

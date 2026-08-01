@@ -26,6 +26,8 @@ async def members(queue_id: int) -> list[int]:
 
 
 async def is_full(custom_id: int) -> bool:
+    """True once every seat is taken. Registration stays open past this point —
+    the extras become subs (see `custom.roster`)."""
     q = await queue_for_custom(custom_id)
     if not q:
         return False

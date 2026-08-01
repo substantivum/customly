@@ -12,8 +12,8 @@ from bot.db import SessionLocal
 from bot.db.models import Map
 
 DEFAULT_POOL = [
-    "Ascent", "Bind", "Haven", "Split", "Lotus",
-    "Sunset", "Icebox", "Abyss", "Pearl", "Fracture",
+    "Abyss", "Ascent", "Bind", "Breeze", "Corode", "Haven", "Lotus", "Split", "Summit",
+    "Sunset", "Icebox", "Pearl", "Fracture",
 ]
 
 # What a user can type instead of a map list to mean "the competitive pool".

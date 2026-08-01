@@ -91,6 +91,9 @@ class Custom(Base):
     team_size: Mapped[int] = mapped_column(Integer, default=5)  # players per side (2-5)
     map_pool: Mapped[str] = mapped_column(Text)              # JSON list
     draft_mode: Mapped[str] = mapped_column(String(16), default="snake")  # snake|alternate
+    # How captains are picked when this custom starts. Chosen once, at creation —
+    # the start button shouldn't be where you decide how the game is run.
+    captain_method: Mapped[str] = mapped_column(String(16), default="random")
     start_time: Mapped[datetime] = mapped_column()           # ISO, overlap checks
     vc_category: Mapped[int | None] = mapped_column(Integer)
     reg_channel: Mapped[int | None] = mapped_column(Integer)  # #custom-<id>
@@ -241,6 +244,26 @@ class AuditLog(Base):
     target: Mapped[str | None] = mapped_column(String(128))
     meta_json: Mapped[str | None] = mapped_column(Text)
     ts: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class PanelBoard(Base):
+    """A posted control board, so the bot can find it again to redraw it.
+
+    One board per tier per guild: re-running `/panel` for a tier replaces the
+    row (and deletes the message it points at), which is what keeps a stale
+    board from lingering after an update.
+    """
+
+    __tablename__ = "panel_boards"
+    guild_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tier: Mapped[str] = mapped_column(String(16), primary_key=True)  # player|admin|superadmin
+    channel_id: Mapped[int] = mapped_column(Integer)
+    message_id: Mapped[int] = mapped_column(Integer)
+    posted_by: Mapped[int | None] = mapped_column(Integer)
+    posted_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    __table_args__ = (
+        CheckConstraint("tier IN ('player','admin','superadmin')", name="ck_panel_tier"),
+    )
 
 
 class Ban(Base):

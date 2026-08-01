@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from bot.db.models import Custom
-from bot.services.draft import DRAFT_MODE_LABEL
+from bot.services.draft import CAPTAIN_METHOD_LABEL, DRAFT_MODE_LABEL
 
 VAL_RED = discord.Color.from_str("#ff4655")
 
@@ -24,11 +24,20 @@ def ts(dt: datetime, style: str = "F") -> str:
     return discord.utils.format_dt(as_utc(dt), style=style)
 
 
-def custom_registration_embed(custom: Custom, registered: list[int], size: int) -> discord.Embed:
+SHOW_MAX = 10  # keep an embed field under Discord's 1024-char limit
+
+
+def custom_registration_embed(
+    custom: Custom,
+    registered: list[int],
+    size: int,
+    waitlist: list[int] | None = None,
+) -> discord.Embed:
     pool = ", ".join(json.loads(custom.map_pool))
     start = as_utc(custom.start_time)
     end = start + timedelta(hours=custom.duration_h)
     draft = DRAFT_MODE_LABEL.get(custom.draft_mode or "snake", custom.draft_mode)
+    method = custom.captain_method or "random"
     e = discord.Embed(
         title=f"🎮 Custom #{custom.custom_id} — {custom.name}",
         description=(
@@ -36,12 +45,22 @@ def custom_registration_embed(custom: Custom, registered: list[int], size: int) 
             f"**Starts:** {ts(start, 'F')}  ({ts(start, 'R')})\n"
             f"**Block:** {ts(start, 't')} – {ts(end, 't')}\n"
             f"**Map pool:** {pool}\n"
-            f"**Draft:** {draft}"
+            f"**Draft:** {draft}\n"
+            f"**Captains:** {CAPTAIN_METHOD_LABEL.get(method, method)}"
         ),
         color=VAL_RED,
     )
-    names = "\n".join(f"• <@{u}>" for u in registered) or "_no one yet_"
+    names = "\n".join(f"• <@{u}>" for u in registered[:SHOW_MAX]) or "_no one yet_"
     e.add_field(name=f"Registered ({len(registered)}/{size})", value=names, inline=False)
+    if waitlist:
+        queued = "\n".join(f"{i}. <@{u}>" for i, u in enumerate(waitlist[:SHOW_MAX], 1))
+        if len(waitlist) > SHOW_MAX:
+            queued += f"\n_…and {len(waitlist) - SHOW_MAX} more_"
+        e.add_field(
+            name=f"🪑 Waitlist ({len(waitlist)})",
+            value=queued + "\n_Subs move up automatically when a starter leaves._",
+            inline=False,
+        )
     e.add_field(name="Owner", value=f"<@{custom.owner_id}>", inline=True)
     e.add_field(name="State", value=custom.state, inline=True)
     e.set_footer(text="Use the buttons below to register or leave.")

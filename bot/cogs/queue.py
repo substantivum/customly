@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.core.ui import reply
-from bot.services import queue_svc
+from bot.services import custom as custom_svc
 
 
 class QueueCog(commands.GroupCog, name="queue"):
@@ -15,12 +15,16 @@ class QueueCog(commands.GroupCog, name="queue"):
 
     @app_commands.command(description="Show a custom's queue status.")
     async def status(self, itx: discord.Interaction, custom_id: int):
-        q = await queue_svc.queue_for_custom(custom_id)
-        if not q:
+        r = await custom_svc.roster(custom_id)
+        if not r.size:
             return await reply(itx, "No queue for that custom.")
-        ids = await queue_svc.members(q.queue_id)
-        body = "\n".join(f"• <@{u}>" for u in ids) or "_empty_"
-        await reply(itx, f"**Queue for Custom #{custom_id}** ({len(ids)}/{q.size})\n{body}")
+        body = "\n".join(f"• <@{u}>" for u in r.starters) or "_empty_"
+        if r.waitlist:
+            body += "\n**🪑 Waitlist:** " + ", ".join(f"<@{u}>" for u in r.waitlist)
+        await reply(
+            itx,
+            f"**Queue for Custom #{custom_id}** ({len(r.starters)}/{r.size})\n{body}",
+        )
 
 
 async def setup(bot: commands.Bot):

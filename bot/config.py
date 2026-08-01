@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     admin_role: int | None = None               # ADMIN_ROLE — grants bot "admin"
     superadmin_role: int | None = None          # SUPERADMIN_ROLE — grants bot "superadmin"
 
+    # Where each staff board may be posted. Set these to the ids of your
+    # (privately-permissioned) staff channels and `/panel tier:admin` refuses to
+    # post anywhere else — the board can't be leaked into a public channel by a
+    # mis-click. Leave blank and the tier may be posted anywhere.
+    admin_panel_channel: int | None = None      # ADMIN_PANEL_CHANNEL
+    superadmin_panel_channel: int | None = None  # SUPERADMIN_PANEL_CHANNEL
+
     # Server-local time. Discord exposes no per-user timezone, so a bare `HH:MM`
     # start time is read in this zone: 6 = UTC+6 (Bishkek), -5 = UTC-5.
     tz_offset: int = 0
@@ -32,6 +39,7 @@ class Settings(BaseSettings):
     @field_validator(
         "customs_category_id", "custom_config_channel", "default_voice_channel",
         "guild_id", "admin_role", "superadmin_role",
+        "admin_panel_channel", "superadmin_panel_channel",
         mode="before",
     )
     @classmethod
