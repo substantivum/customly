@@ -11,6 +11,9 @@ import asyncio
 
 import discord
 
+from bot.i18n import t
+from bot.i18n.ui import LocalizedView
+
 DISMISS_AFTER = 30  # seconds
 
 # keep strong refs so scheduled deletions aren't garbage-collected
@@ -49,7 +52,7 @@ async def reply(
     return msg
 
 
-class AutoDismissView(discord.ui.View):
+class AutoDismissView(LocalizedView):
     """Ephemeral panel whose message self-deletes 30s after the last interaction."""
 
     def __init__(self, *, timeout: float | None = DISMISS_AFTER):
@@ -88,29 +91,27 @@ async def spawn(itx: discord.Interaction, view: discord.ui.View, *, content=None
     return msg
 
 
-class ConfirmView(discord.ui.View):
-    """Confirm / (optional) Force / Cancel. `result` is set on click."""
+class ConfirmView(LocalizedView):
+    """Confirm / (optional) Force / Cancel. `result` is set on click.
+
+    The buttons are built here rather than declared with `@discord.ui.button`:
+    a decorator's label is fixed at import time, before any language is known.
+    """
 
     def __init__(self, *, allow_force: bool = False, timeout: int = 30):
         super().__init__(timeout=timeout)
         self.result: str | None = None  # "yes" | "force" | "no" | None(timeout)
-        if not allow_force:
-            self.remove_item(self.force)
+        self.add_item(self._Choice("btn.confirm", "yes", discord.ButtonStyle.danger))
+        if allow_force:
+            self.add_item(self._Choice("btn.force", "force", discord.ButtonStyle.danger))
+        self.add_item(self._Choice("btn.cancel", "no", discord.ButtonStyle.secondary))
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def yes(self, itx: discord.Interaction, _b: discord.ui.Button):
-        self.result = "yes"
-        self.stop()
-        await itx.response.defer()
+    class _Choice(discord.ui.Button):
+        def __init__(self, label_key: str, result: str, style):
+            super().__init__(label=t(label_key), style=style)
+            self.result = result
 
-    @discord.ui.button(label="Force", style=discord.ButtonStyle.danger)
-    async def force(self, itx: discord.Interaction, _b: discord.ui.Button):
-        self.result = "force"
-        self.stop()
-        await itx.response.defer()
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def no(self, itx: discord.Interaction, _b: discord.ui.Button):
-        self.result = "no"
-        self.stop()
-        await itx.response.defer()
+        async def callback(self, itx: discord.Interaction):
+            self.view.result = self.result
+            self.view.stop()
+            await itx.response.defer()

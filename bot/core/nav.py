@@ -18,6 +18,7 @@ from __future__ import annotations
 import discord
 
 from bot.core.ui import AutoDismissView, spawn
+from bot.i18n import t
 
 NAV_TIMEOUT = 180  # private panels are for reading as well as clicking
 
@@ -93,7 +94,7 @@ class Screen(AutoDismissView):
 
 class _Back(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Back", style=discord.ButtonStyle.secondary, emoji="◀️", row=4)
+        super().__init__(label=t("btn.back"), style=discord.ButtonStyle.secondary, row=4)
 
     async def callback(self, itx: discord.Interaction):
         view: Screen = self.view
@@ -102,7 +103,7 @@ class _Back(discord.ui.Button):
 
 class _Reload(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Refresh", style=discord.ButtonStyle.secondary, emoji="🔄", row=4)
+        super().__init__(label=t("btn.refresh"), style=discord.ButtonStyle.secondary, row=4)
 
     async def callback(self, itx: discord.Interaction):
         await self.view.reload(itx)

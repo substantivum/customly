@@ -20,10 +20,12 @@ import discord
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core.embeds import VAL_RED, start_text
+from bot.core.embeds import EMBED_COLOR, start_text
 from bot.db import SessionLocal
 from bot.db.models import Ban, Custom, MemberRole
+from bot.i18n import LANG_NAME, t, use_lang
 from bot.services import custom as custom_svc
+from bot.services import guild_svc
 from bot.services import maps as maps_svc
 from bot.services import panel_svc
 
@@ -32,14 +34,29 @@ log = logging.getLogger("valbot.board")
 SHOW_MAX = 8           # customs listed on a board before it says "…and N more"
 COALESCE_SECONDS = 1.5  # burst window: many joins in a row cost one edit
 
-STATE_EMOJI = {
+# The one place pictographs survive: a coloured dot per lifecycle state is what
+# makes a board scannable, and it reads the same in every language.
+STATE_DOT = {
     "registration": "🟢",
     "full": "🟡",
-    "ready": "🔔",
-    "veto": "🗺",
+    "ready": "🔵",
+    "veto": "🟠",
     "live": "🔴",
     "done": "⚫",
 }
+FALLBACK_DOT = "⚪"
+
+# Configured / not configured, in the superadmin config summary.
+OK_MARK, WARN_MARK = "✅", "⚠️"
+
+
+def state_dot(state: str) -> str:
+    return STATE_DOT.get(state, FALLBACK_DOT)
+
+
+def state_name(state: str) -> str:
+    """A lifecycle state as a player reads it."""
+    return t(f"state.{state}") if state in STATE_DOT else state
 
 
 # ------------------------------------------------------------------ queries ---
@@ -66,23 +83,24 @@ async def custom_line(c: Custom, *, with_owner: bool = False) -> str:
     """One custom as a single readable line on a board."""
     taken, size, waiting = await seats(c)
     bits = [
-        f"{STATE_EMOJI.get(c.state, '•')} **#{c.custom_id} · {c.name}**",
-        f"{c.format} · {c.team_size}v{c.team_size} · **{taken}/{size}** seats"
-        + (f" (+{waiting} 🪑)" if waiting else ""),
-        (start_text(c) if c.start_asap else f"starts {start_text(c, 'R')}")
-        + f" · `{c.state}`",
+        f"{state_dot(c.state)} **#{c.custom_id} · {c.name}**",
+        t("board.line.seats", fmt=c.format, size=c.team_size, taken=taken, total=size)
+        + (t("board.line.waiting", n=waiting) if waiting else ""),
+        (start_text(c) if c.start_asap
+         else t("board.line.starts", when=start_text(c, "R")))
+        + f" · `{state_name(c.state)}`",
     ]
     if with_owner:
-        bits.append(f"owner <@{c.owner_id}>")
-    return bits[0] + "\n " + " · ".join(bits[1:])
+        bits.append(t("board.line.owner", owner_id=c.owner_id))
+    return bits[0] + "\n " + " · ".join(bits[1:])
 
 
 async def customs_field(customs: list[Custom], *, with_owner: bool = False) -> str:
     if not customs:
-        return "_Nothing running right now._"
+        return t("board.nothing_running")
     lines = [await custom_line(c, with_owner=with_owner) for c in customs[:SHOW_MAX]]
     if len(customs) > SHOW_MAX:
-        lines.append(f"_…and {len(customs) - SHOW_MAX} more._")
+        lines.append(t("board.and_more", n=len(customs) - SHOW_MAX))
     return "\n".join(lines)
 
 
@@ -96,19 +114,16 @@ def _stamp(e: discord.Embed, note: str) -> discord.Embed:
 async def player_embed(guild: discord.Guild) -> discord.Embed:
     customs = await active_customs(guild.id)
     e = discord.Embed(
-        title="🎮 Customs",
-        description=(
-            "Every open game is listed below. Hit **Browse & join** to open your "
-            "own private menu — pick a game, register or leave, check the roster."
-        ),
-        color=VAL_RED,
+        title=t("board.player.title"),
+        description=t("board.player.desc"),
+        color=EMBED_COLOR,
     )
     e.add_field(
-        name=f"Open games ({len(customs)})",
+        name=t("board.open_games", n=len(customs)),
         value=await customs_field(customs),
         inline=False,
     )
-    return _stamp(e, "Updates itself · your menu is private to you")
+    return _stamp(e, t("board.footer.player"))
 
 
 async def admin_embed(guild: discord.Guild) -> discord.Embed:
@@ -117,27 +132,27 @@ async def admin_embed(guild: discord.Guild) -> discord.Embed:
     enabled = [m.name for m in all_maps if m.enabled]
     competitive = [m.name for m in all_maps if m.competitive and m.enabled]
     e = discord.Embed(
-        title="🛡 Admin Panel",
-        description="Create and run customs. Every button opens a private menu.",
-        color=VAL_RED,
+        title=t("board.admin.title"),
+        description=t("board.admin.desc"),
+        color=EMBED_COLOR,
     )
     e.add_field(
-        name=f"Active customs ({len(customs)})",
+        name=t("board.active_customs", n=len(customs)),
         value=await customs_field(customs, with_owner=True),
         inline=False,
     )
     e.add_field(
-        name="🗺 Map pool",
-        value=(f"**{len(enabled)}/{len(all_maps)}** enabled"
-               if all_maps else "_Not seeded — use **Maps → Seed defaults**._"),
+        name=t("board.map_pool"),
+        value=(t("board.map_pool_count", enabled=len(enabled), total=len(all_maps))
+               if all_maps else t("board.map_pool_unseeded")),
         inline=True,
     )
     e.add_field(
-        name="⭐ Competitive pool",
-        value=", ".join(competitive) if competitive else "_not set_",
+        name=t("board.competitive"),
+        value=", ".join(competitive) if competitive else t("common.not_set"),
         inline=True,
     )
-    return _stamp(e, "Updates itself when a custom changes")
+    return _stamp(e, t("board.footer.staff"))
 
 
 async def _staff(guild: discord.Guild) -> tuple[list[int], list[int]]:
@@ -160,8 +175,8 @@ def _role_line(guild: discord.Guild, role_id: int | None, granted: list[int]) ->
     parts = [role.mention] if role else []
     parts += [f"<@{u}>" for u in granted[:10]]
     if len(granted) > 10:
-        parts.append(f"_+{len(granted) - 10} more_")
-    return ", ".join(parts) if parts else "_none_"
+        parts.append(t("board.more_granted", n=len(granted) - 10))
+    return ", ".join(parts) if parts else t("common.none")
 
 
 async def super_embed(guild: discord.Guild) -> discord.Embed:
@@ -174,34 +189,39 @@ async def super_embed(guild: discord.Guild) -> discord.Embed:
         by_state[c.state] = by_state.get(c.state, 0) + 1
 
     e = discord.Embed(
-        title="👑 Super Admin",
-        description="Server-wide controls. Every button opens a private menu.",
-        color=VAL_RED,
+        title=t("board.super.title"),
+        description=t("board.super.desc"),
+        color=EMBED_COLOR,
     )
     e.add_field(
-        name=f"Customs ({len(customs)} active)",
-        value=" · ".join(f"{STATE_EMOJI.get(k, '•')} {k} **{v}**"
-                         for k, v in sorted(by_state.items())) or "_none active_",
+        name=t("board.customs_active", n=len(customs)),
+        value=" · ".join(f"{state_dot(k)} {state_name(k)} **{v}**"
+                         for k, v in sorted(by_state.items())) or t("board.none_active"),
         inline=False,
     )
-    e.add_field(name="🛡 Admins", value=_role_line(guild, settings.admin_role, admins),
+    e.add_field(name=t("board.admins"), value=_role_line(guild, settings.admin_role, admins),
                 inline=False)
-    e.add_field(name="👑 Superadmins",
+    e.add_field(name=t("board.superadmins"),
                 value=_role_line(guild, settings.superadmin_role, supers), inline=False)
-    e.add_field(name="🔨 Banned players", value=str(bans), inline=True)
-    e.add_field(name="⚙️ Config", value=_config_summary(), inline=True)
-    return _stamp(e, "Updates itself when a custom changes")
+    e.add_field(name=t("board.banned"), value=str(bans), inline=True)
+    e.add_field(name=t("board.config"), value=_config_summary(), inline=True)
+    e.add_field(
+        name=t("board.language"),
+        value=LANG_NAME.get(await guild_svc.get_lang(guild.id), "?"),
+        inline=True,
+    )
+    return _stamp(e, t("board.footer.staff"))
 
 
 def _config_summary() -> str:
-    def mark(value: int | None, label: str) -> str:
-        return f"{'✅' if value else '⚠️'} {label}"
+    def mark(value: int | None, label_key: str) -> str:
+        return f"{OK_MARK if value else WARN_MARK} {t(label_key)}"
 
     return "\n".join([
-        mark(settings.customs_category_id, "customs category"),
-        mark(settings.custom_config_channel, "config channel"),
-        mark(settings.admin_panel_channel, "admin channel"),
-        mark(settings.superadmin_panel_channel, "superadmin channel"),
+        mark(settings.customs_category_id, "board.cfg.category"),
+        mark(settings.custom_config_channel, "board.cfg.config_channel"),
+        mark(settings.admin_panel_channel, "board.cfg.admin_channel"),
+        mark(settings.superadmin_panel_channel, "board.cfg.super_channel"),
     ])
 
 
@@ -219,21 +239,27 @@ async def embed_for(guild: discord.Guild, tier: str) -> discord.Embed:
 # ------------------------------------------------------------------ refresh ---
 async def refresh(guild: discord.Guild) -> None:
     """Redraw every board registered for this guild. Boards whose message is
-    gone are forgotten rather than retried forever."""
-    for b in await panel_svc.boards(guild.id):
-        channel = guild.get_channel(b.channel_id)
-        if not isinstance(channel, discord.abc.Messageable):
-            await panel_svc.forget(guild.id, b.tier)
-            continue
-        try:
-            msg = await channel.fetch_message(b.message_id)
-            # Edit the embed only: the buttons on the message are persistent and
-            # stay bound to the view registered at startup.
-            await msg.edit(embed=await embed_for(guild, b.tier))
-        except discord.NotFound:
-            await panel_svc.forget(guild.id, b.tier)
-        except discord.HTTPException as e:
-            log.debug("board refresh failed (%s/%s): %s", guild.id, b.tier, e)
+    gone are forgotten rather than retried forever.
+
+    Both the embed *and* the components are rewritten: button labels are part of
+    the message, so a language change would otherwise leave a Russian board
+    wearing English buttons until someone re-ran `/panel`."""
+    from bot.cogs.panel import BOARD_VIEW
+
+    async with use_lang(guild.id):
+        for b in await panel_svc.boards(guild.id):
+            channel = guild.get_channel(b.channel_id)
+            if not isinstance(channel, discord.abc.Messageable):
+                await panel_svc.forget(guild.id, b.tier)
+                continue
+            try:
+                msg = await channel.fetch_message(b.message_id)
+                view = BOARD_VIEW[b.tier]()
+                await msg.edit(embed=await embed_for(guild, b.tier), view=view)
+            except discord.NotFound:
+                await panel_svc.forget(guild.id, b.tier)
+            except discord.HTTPException as e:
+                log.debug("board refresh failed (%s/%s): %s", guild.id, b.tier, e)
 
 
 _pending: dict[int, asyncio.Task] = {}

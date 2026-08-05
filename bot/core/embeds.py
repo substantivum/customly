@@ -7,9 +7,15 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from bot.db.models import Custom
-from bot.services.draft import CAPTAIN_METHOD_LABEL, DRAFT_MODE_LABEL
+from bot.i18n import t
+from bot.services.draft import captain_label, draft_mode_label
 
-VAL_RED = discord.Color.from_str("#ff4655")
+# The bot's one accent colour. Muted olive: it holds up as an embed's left bar in
+# both Discord themes, where a lighter sand washes out against the dark one.
+EMBED_COLOR = discord.Color.from_str("#6B7A4B")
+
+# Not a translatable string — a typographic placeholder for "no value".
+DASH = "—"
 
 
 def as_utc(dt: datetime) -> datetime:
@@ -24,9 +30,6 @@ def ts(dt: datetime, style: str = "F") -> str:
     return discord.utils.format_dt(as_utc(dt), style=style)
 
 
-ASAP_LABEL = "🔥 **ASAP**"
-
-
 def start_text(custom: Custom, style: str = "F") -> str:
     """How a custom's start time reads to a player.
 
@@ -35,14 +38,14 @@ def start_text(custom: Custom, style: str = "F") -> str:
     it says ASAP, because that's what was actually agreed.
     """
     if getattr(custom, "start_asap", False):
-        return ASAP_LABEL
+        return t("custom.asap")
     return ts(custom.start_time, style)
 
 
 def start_line(custom: Custom) -> str:
     """The fuller form, for a detail embed."""
     if getattr(custom, "start_asap", False):
-        return f"{ASAP_LABEL} — as soon as the lobby is ready"
+        return t("custom.asap_full")
     return f"{ts(custom.start_time, 'F')}  ({ts(custom.start_time, 'R')})"
 
 
@@ -58,34 +61,39 @@ def custom_registration_embed(
     pool = ", ".join(json.loads(custom.map_pool))
     start = as_utc(custom.start_time)
     end = start + timedelta(hours=custom.duration_h)
-    draft = DRAFT_MODE_LABEL.get(custom.draft_mode or "snake", custom.draft_mode)
-    method = custom.captain_method or "random"
     e = discord.Embed(
-        title=f"🎮 Custom #{custom.custom_id} — {custom.name}",
-        description=(
-            f"**Format:** {custom.format}  ·  **{custom.team_size}v{custom.team_size}**\n"
-            f"**Starts:** {start_line(custom)}\n"
-            f"**Block:** {ts(start, 't')} – {ts(end, 't')}\n"
-            f"**Map pool:** {pool}\n"
-            f"**Draft:** {draft}\n"
-            f"**Captains:** {CAPTAIN_METHOD_LABEL.get(method, method)}"
+        title=t("custom.reg.title", custom_id=custom.custom_id, name=custom.name),
+        description=t(
+            "custom.reg.body",
+            fmt=custom.format,
+            size=custom.team_size,
+            start=start_line(custom),
+            from_time=ts(start, "t"),
+            to_time=ts(end, "t"),
+            pool=pool,
+            draft=draft_mode_label(custom.draft_mode or "snake"),
+            captains=captain_label(custom.captain_method or "random"),
         ),
-        color=VAL_RED,
+        color=EMBED_COLOR,
     )
-    names = "\n".join(f"• <@{u}>" for u in registered[:SHOW_MAX]) or "_no one yet_"
-    e.add_field(name=f"Registered ({len(registered)}/{size})", value=names, inline=False)
+    names = "\n".join(f"• <@{u}>" for u in registered[:SHOW_MAX]) or t("custom.reg.no_one")
+    e.add_field(
+        name=t("custom.reg.registered", n=len(registered), size=size),
+        value=names,
+        inline=False,
+    )
     if waitlist:
         queued = "\n".join(f"{i}. <@{u}>" for i, u in enumerate(waitlist[:SHOW_MAX], 1))
         if len(waitlist) > SHOW_MAX:
-            queued += f"\n_…and {len(waitlist) - SHOW_MAX} more_"
+            queued += t("custom.reg.waitlist_more", n=len(waitlist) - SHOW_MAX)
         e.add_field(
-            name=f"🪑 Waitlist ({len(waitlist)})",
-            value=queued + "\n_Subs move up automatically when a starter leaves._",
+            name=t("custom.reg.waitlist", n=len(waitlist)),
+            value=queued + t("custom.reg.waitlist_note"),
             inline=False,
         )
-    e.add_field(name="Owner", value=f"<@{custom.owner_id}>", inline=True)
-    e.add_field(name="State", value=custom.state, inline=True)
-    e.set_footer(text="Use the buttons below to register or leave.")
+    e.add_field(name=t("common.owner"), value=f"<@{custom.owner_id}>", inline=True)
+    e.add_field(name=t("common.state"), value=t(f"state.{custom.state}"), inline=True)
+    e.set_footer(text=t("custom.reg.footer"))
     return e
 
 
@@ -99,18 +107,23 @@ def lobby_embed(
     party_code: str | None,
     viewer_can_see_code: bool,
 ) -> discord.Embed:
-    e = discord.Embed(title=f"🏟 Match Lobby — Custom #{custom.custom_id}", color=VAL_RED)
+    e = discord.Embed(
+        title=t("lobby.title", custom_id=custom.custom_id), color=EMBED_COLOR
+    )
     e.add_field(
-        name=f"🟥 Team A (cap {f'<@{cap_a}>' if cap_a else '—'})",
-        value="\n".join(f"<@{u}>" for u in team_a) or "—",
+        name=t("lobby.team_cap", team=t("common.team_a"),
+               captain=f"<@{cap_a}>" if cap_a else DASH),
+        value="\n".join(f"<@{u}>" for u in team_a) or DASH,
         inline=True,
     )
     e.add_field(
-        name=f"🟦 Team B (cap {f'<@{cap_b}>' if cap_b else '—'})",
-        value="\n".join(f"<@{u}>" for u in team_b) or "—",
+        name=t("lobby.team_cap", team=t("common.team_b"),
+               captain=f"<@{cap_b}>" if cap_b else DASH),
+        value="\n".join(f"<@{u}>" for u in team_b) or DASH,
         inline=True,
     )
-    e.add_field(name="Maps", value=", ".join(maps) or "TBD", inline=False)
-    code = (party_code or "—") if viewer_can_see_code else "🔒 hidden"
-    e.add_field(name="🔑 Party Code", value=code, inline=False)
+    e.add_field(name=t("common.maps"), value=", ".join(maps) or t("common.tbd"),
+                inline=False)
+    code = (party_code or DASH) if viewer_can_see_code else t("common.hidden")
+    e.add_field(name=t("lobby.party_code"), value=code, inline=False)
     return e

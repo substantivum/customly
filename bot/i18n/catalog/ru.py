@@ -1,0 +1,675 @@
+"""Russian catalog.
+
+Mirrors `en.py` key for key; `tests/test_i18n.py` fails the build if the two
+drift apart or if a placeholder set stops matching.
+"""
+from __future__ import annotations
+
+STRINGS: dict[str, str] = {
+    # ------------------------------------------------------------- общее ---
+    "common.owner": "Владелец",
+    "common.state": "Статус",
+    "common.seats": "Места",
+    "common.players": "Игроки",
+    "common.waitlist": "Лист ожидания",
+    "common.maps": "Карты",
+    "common.draft": "Драфт",
+    "common.captains": "Капитаны",
+    "common.selected": "Выбрано",
+    "common.teams": "Команды",
+    "common.waiting_on": "Ожидание",
+    "common.team_a": "Команда A",
+    "common.team_b": "Команда B",
+    "common.enabled": "включена",
+    "common.disabled": "выключена",
+    "common.nobody": "_никого_",
+    "common.nobody_yet": "_пока никого_",
+    "common.not_set": "_не задан_",
+    "common.none": "_нет_",
+    "common.tbd": "не выбраны",
+    "common.auto_note": " _(авто)_",
+    "common.auto_paren": " (авто)",
+    "common.its_channel": "его канале",
+    "common.hidden": "🔒 скрыт",
+
+    "rank.player": "Игрок",
+    "rank.admin": "Админ",
+    "rank.superadmin": "Суперадмин",
+    "role.player": "игрок",
+    "role.admin": "админ",
+    "role.superadmin": "суперадмин",
+
+    "state.registration": "набор",
+    "state.full": "состав собран",
+    "state.ready": "проверка готовности",
+    "state.veto": "вето карт",
+    "state.live": "идёт игра",
+    "state.done": "завершён",
+
+    "tier.player": "Кастомы",
+    "tier.admin": "Админ",
+    "tier.superadmin": "Суперадмин",
+
+    # ------------------------------------------------------------ кнопки ---
+    "btn.register": "Записаться",
+    "btn.leave": "Выйти",
+    "btn.confirm": "Подтвердить",
+    "btn.force": "Принудительно",
+    "btn.cancel": "Отмена",
+    "btn.back": "Назад",
+    "btn.refresh": "Обновить",
+    "btn.continue": "Далее",
+    "btn.browse": "Выбрать и записаться",
+    "btn.create_custom": "Создать кастом",
+    "btn.manage_customs": "Мои кастомы",
+    "btn.manage_any": "Любой кастом",
+    "btn.maps": "Карты",
+    "btn.bans": "Баны",
+    "btn.audit": "Журнал",
+    "btn.bot_roles": "Роли бота",
+    "btn.prune": "Удалить все кастомы",
+    "btn.language": "Язык",
+    "btn.ready_check": "Проверка готовности",
+    "btn.start": "Начать",
+    "btn.force_start": "Начать принудительно",
+    "btn.end": "Завершить",
+    "btn.delete": "Удалить",
+    "btn.seed": "Загрузить стандартные",
+    "btn.add_map": "Добавить карту",
+    "btn.competitive_pool": "Соревновательный пул",
+    "btn.ban": "Забанить",
+    "btn.unban": "Разбанить",
+    "btn.grant": "Выдать",
+    "btn.revoke": "Снять",
+    "btn.set_code": "Задать код лобби",
+    "btn.end_custom": "Завершить кастом",
+    "btn.ready": "Готов",
+    "btn.cant_play": "Не могу играть",
+    "btn.attack": "Атака",
+    "btn.defence": "Защита",
+
+    # ------------------------------------------------------------ ошибки ---
+    "error.generic": "Что-то пошло не так.",
+    "error.need_role": "Для этого действия нужна роль **{role}**.",
+    "error.need_role_cmd": "Для этого нужна роль **{role}**.",
+    "error.config_channel": "Выполните это в настроенном канале конфигурации.",
+    "error.custom_gone": "Кастом #{custom_id} больше не существует.",
+    "error.custom_not_found": "Кастом не найден.",
+    "error.cant_manage": "У вас нет прав управлять этим кастомом.",
+    "error.superadmin_only": "Только для суперадмина.",
+    "error.force_superadmin": "Принудительный режим доступен только суперадмину.",
+    "error.delete_perm": "Удалить может только владелец или суперадмин.",
+    "error.manage_perm": "Это может сделать только владелец или суперадмин.",
+    "error.start_perm": "Начать этот кастом может только владелец или суперадмин.",
+    "error.transfer_perm": "Передать кастом может только владелец или суперадмин.",
+    "error.already_owner": "{name} уже владеет кастомом #{custom_id}.",
+    "error.bot_owner": "Бот не может владеть кастомом.",
+    "error.code_perm": (
+        "Задать код может только участник этого кастома (или админ)."
+    ),
+    "error.end_perm": "Завершить может только участник этого кастома (или админ).",
+    "error.not_starter": "Вы не в основном составе этой игры.",
+    "error.not_your_call": "Сейчас не ваш ход.",
+    "error.not_your_turn": "Сейчас не ваш ход бана/пика.",
+    "error.not_your_side": "Сторону выбирает не ваша команда.",
+    "error.not_your_pick": "Сейчас не ваш пик.",
+    "error.bad_start": "Время старта — `ЧЧ:ММ` или ISO `2026-06-24T20:00`.",
+    "error.no_queue": "У этого кастома нет очереди.",
+    "error.no_channel": "У кастома не осталось канала, чтобы провести матч.",
+    "error.no_match_yet": "В этом кастоме матч ещё не начался.",
+    "error.code_charset": "Код лобби должен быть буквенно-цифровым (можно `-` и `_`).",
+    "error.already_ended": "Этот кастом уже завершён.",
+    "error.not_started": "Кастом ещё не начался — удалите его вместо завершения.",
+    "error.match_not_found": "Матч не найден.",
+    "error.result_perm": "Результаты может внести только капитан этого матча или админ.",
+    "error.no_draw": "Карта не может закончиться ничьёй — счёт должен различаться.",
+    "error.riot_id": "Riot ID должен быть вида `TenZ#NA1` (Имя#ТЕГ).",
+    "error.flow_step": (
+        "⚠️ Не удалось перейти к этапу «{what}» — `{error}`.\n"
+        "Попросите админа завершить кастом и запустить его заново "
+        "(подробности — в логе бота)."
+    ),
+    "error.team_vcs": (
+        "⚠️ Не удалось создать голосовые каналы команд — `{error}`. "
+        "Продолжаем вето; создайте их вручную или освободите категорию "
+        "кастомов перед следующей игрой."
+    ),
+
+    "error.ready_running": (
+        "По кастому #{custom_id} идёт проверка готовности. Дождитесь её или "
+        "нажмите **Начать** / **Начать принудительно**, чтобы прервать."
+    ),
+    "error.match_in_progress": (
+        "В кастоме #{custom_id} уже идёт матч (статус: {state}). "
+        "Завершите его или выполните `/custom delete`, чтобы начать заново."
+    ),
+    "error.pool_recreate": "{reason} Пересоздайте кастом с подходящим пулом карт.",
+    "error.partial_even": "Для ручного старта нужно чётное число игроков ≥ 2 (сейчас {n}).",
+    "error.queue_not_full": (
+        "Очередь не заполнена ({have}/{size}). "
+        "Используйте принудительный старт, чтобы начать текущим составом."
+    ),
+    "error.manual_both": "Ручной выбор капитанов: укажите обоих капитанов.",
+    "error.manual_distinct": "Капитаны должны быть двумя разными игроками.",
+    "error.manual_registered": "Оба капитана должны быть записаны в этот кастом.",
+
+    "error.ready_already": "По кастому #{custom_id} проверка готовности уже идёт.",
+    "error.ready_state": (
+        "Кастом #{custom_id} в статусе `{state}` — проверка готовности имеет "
+        "смысл только до начала матча."
+    ),
+    "error.ready_no_channel": "У кастома нет канала для проверки готовности.",
+    "error.ready_even": "Для проверки готовности нужно чётное число игроков ≥ 2 (сейчас {n}).",
+
+    "error.banned": "Вам запрещено записываться на игры этого сервера.",
+    "error.not_open": "Кастом #{custom_id} закрыт для записи.",
+    "error.conflict": "Пересекается с **{name}** ({start}–{end}).",
+    "error.already_registered": "Вы уже записаны.",
+    "error.format": "Формат должен быть BO1, BO3 или BO5.",
+    "error.team_size": "Размер команды — от 1 до 5 (от 1v1 до 5v5).",
+    "error.draft_mode": "Режим драфта должен быть одним из: {modes}.",
+    "error.captain_method": "Способ выбора капитанов должен быть одним из: {methods}.",
+    "error.unknown_captain": "Неизвестный способ выбора капитанов: {method}",
+    "error.manual_two": "Для ручного способа нужно выбрать двух капитанов.",
+    "error.volunteers": "Нужно минимум два добровольца.",
+    "error.no_votes": "Голоса не зафиксированы.",
+    "error.no_comp_pool": (
+        "Соревновательный пул для сервера ещё не задан — админ может задать его "
+        "в **Панель админа → Карты → Соревновательный пул**."
+    ),
+    "error.no_maps_pool": (
+        "Карты не указаны, а включённого пула на сервере нет. "
+        "Сначала выполните `/maps seed` или передайте карты."
+    ),
+    "error.maps_not_enabled": "Карты вне включённого пула: {maps}",
+    "error.in_progress_guard": (
+        "Оба голосовых канала команд заняты — идёт матч. "
+        "Сначала завершите его или (суперадмин) передайте force:true."
+    ),
+
+    "veto.pool.exact": "ровно {n} карт",
+    "veto.pool.min": "минимум {n} карт",
+    "error.veto_format": "Формат должен быть одним из: {formats}.",
+    "error.veto_pool": "Для {fmt} нужно {requirement} в пуле (сейчас {n}).",
+    "error.veto_pool_hint": " Укажите `competitive`, чтобы взять соревновательный пул.",
+
+    # ------------------------------------------------------------ кастом ---
+    "custom.asap": "**СЕЙЧАС**",
+    "custom.asap_full": "**СЕЙЧАС** — как только лобби будет готово",
+    "custom.reg.title": "Кастом #{custom_id} — {name}",
+    "custom.reg.body": (
+        "**Формат:** {fmt}  ·  **{size}v{size}**\n"
+        "**Начало:** {start}\n"
+        "**Интервал:** {from_time} – {to_time}\n"
+        "**Пул карт:** {pool}\n"
+        "**Драфт:** {draft}\n"
+        "**Капитаны:** {captains}"
+    ),
+    "custom.reg.registered": "Записались ({n}/{size})",
+    "custom.reg.no_one": "_пока никого_",
+    "custom.reg.waitlist": "Лист ожидания ({n})",
+    "custom.reg.waitlist_more": "\n_…и ещё {n}_",
+    "custom.reg.waitlist_note": "\n_Запасные поднимаются автоматически, когда кто-то выходит._",
+    "custom.reg.footer": "Используйте кнопки ниже, чтобы записаться или выйти.",
+    "custom.created": "Создан **кастом #{custom_id}** ({size}v{size}) → {channel}",
+    "custom.joined": "Вы записаны на кастом #{custom_id} — ждите проверку готовности.",
+    "custom.joined_waitlist": (
+        "Кастом #{custom_id} заполнен — вы **#{position} в листе ожидания** "
+        "и подниметесь автоматически, если кто-то выйдет."
+    ),
+    "custom.left": "Вы вышли из кастома #{custom_id}.",
+    "custom.promoted_channel": (
+        "<@{user_id}> — освободилось место в **{name}**, вы в игре."
+    ),
+    "custom.promoted_dm": (
+        "Вы поднялись из листа ожидания в **кастом #{custom_id} — {name}** "
+        "на сервере **{guild}**. Вы играете."
+    ),
+    "custom.transfer_note": (
+        "Владение **кастомом #{custom_id} — {name}** передано "
+        "{new_owner} (передал {actor})."
+    ),
+    "custom.transfer_dm": (
+        "Теперь вы владеете **кастомом #{custom_id} — {name}** на сервере "
+        "**{guild}** (передал {actor}).\n"
+        "Начать, завершить, передать или удалить его можно в "
+        "**Панель админа → Мои кастомы** или в {where}."
+    ),
+    "custom.transferred": "Владение кастомом #{custom_id} → {member} (уведомление отправлено).",
+    "custom.transferred_short": "Владение #{custom_id} → {member} (уведомление отправлено).",
+    "custom.ending": "Завершаем кастом — голосовые каналы и этот канал будут удалены.",
+    "custom.ending_cmd": "Завершаем кастом #{custom_id}…",
+    "custom.ended": "Кастом #{custom_id} завершён.",
+    "custom.deleted": "Кастом #{custom_id} удалён.",
+    "custom.pruned": "Удалено кастомов: {n}.",
+    "custom.pruned_skipped": " Пропущены (идёт игра): {ids}.",
+    "custom.none_active": "Активных кастомов нет.",
+    "custom.list_line": (
+        "**#{custom_id}** {name} · {fmt} · {size}v{size} · владелец <@{owner_id}> · {state}"
+    ),
+
+    # ------------------------------------------------------------ панели ---
+    "board.player.title": "Кастомы",
+    "board.player.desc": (
+        "Ниже перечислены все открытые игры. Нажмите **Выбрать и записаться**, "
+        "чтобы открыть личное меню — выбрать игру, записаться или выйти, "
+        "посмотреть состав."
+    ),
+    "board.admin.title": "Панель админа",
+    "board.admin.desc": "Создание и ведение кастомов. Каждая кнопка открывает личное меню.",
+    "board.super.title": "Панель суперадмина",
+    "board.super.desc": "Настройки сервера. Каждая кнопка открывает личное меню.",
+    "board.open_games": "Открытые игры ({n})",
+    "board.active_customs": "Активные кастомы ({n})",
+    "board.customs_active": "Кастомы (активных: {n})",
+    "board.map_pool": "Пул карт",
+    "board.map_pool_count": "включено **{enabled}/{total}**",
+    "board.map_pool_unseeded": "_Пул пуст — используйте **Карты → Загрузить стандартные**._",
+    "board.competitive": "Соревновательный пул",
+    "board.admins": "Админы",
+    "board.superadmins": "Суперадмины",
+    "board.banned": "Забаненные игроки",
+    "board.config": "Конфигурация",
+    "board.language": "Язык",
+    "board.more_granted": "_+ ещё {n}_",
+    "board.nothing_running": "_Сейчас ничего не идёт._",
+    "board.and_more": "_…и ещё {n}._",
+    "board.none_active": "_активных нет_",
+    "board.line.seats": "{fmt} · {size}v{size} · **{taken}/{total}** мест",
+    "board.line.waiting": " (+{n} в ожидании)",
+    "board.line.starts": "старт {when}",
+    "board.line.owner": "владелец <@{owner_id}>",
+    "board.footer.player": "Обновляется автоматически · ваше меню видно только вам",
+    "board.footer.staff": "Обновляется при изменениях в кастомах",
+    "board.cfg.category": "категория кастомов",
+    "board.cfg.config_channel": "канал конфигурации",
+    "board.cfg.admin_channel": "канал админов",
+    "board.cfg.super_channel": "канал суперадминов",
+
+    "panel.err.pinned": (
+        "Панель **{tier}** закреплена за <#{channel_id}> (`{env}`). Выполните команду там."
+    ),
+    "panel.err.reserved": (
+        "Этот канал зарезервирован под панель **{other}** — "
+        "разместите панель {tier} в другом месте."
+    ),
+    "picker.desc": "{fmt} · {size}v{size} · {state}",
+
+    # ------------------------------------------------------------ экраны ---
+    "screen.gone.title": "Удалён",
+    "screen.customs.title": "Кастомы — выберите игру",
+    "screen.customs.desc": "Выберите игру ниже, чтобы увидеть состав и записаться.",
+    "screen.customs.empty": "Сейчас нет открытых игр. Загляните позже.",
+    "screen.customs.youre_in": "  ✅ **вы в игре**",
+    "screen.customs.pick": "Выберите игру…",
+    "screen.custom.you": "Вы",
+    "screen.custom.you_waitlist": "В листе ожидания — сыграете, если кто-то из основы выйдет.",
+    "screen.custom.you_in": "✅ Вы в игре.",
+    "screen.custom.closed": "Запись на эту игру закрыта.",
+
+    "screen.create.title": "Создание кастома",
+    "screen.create.desc": (
+        "Здесь задайте пул карт и режим драфта, затем нажмите **Далее** — "
+        "название, формат, размер команды и время старта."
+    ),
+    "screen.create.all_maps": "_все включённые карты ({n})_",
+    "screen.create.no_maps": "⚠️ Нет включённых карт — сначала заполните пул в разделе **Карты**.",
+    "screen.create.no_comp": (
+        "Соревновательный пул ещё не задан — задайте его в "
+        "**Карты → Соревновательный пул**."
+    ),
+    "screen.create.min_maps": "Выберите минимум 2 карты или ни одной, чтобы взять весь пул.",
+    "screen.create.pool_ph": "Пул карт — выберите 2+ карты (пусто = весь включённый пул)…",
+    "screen.create.draft_ph": "Режим драфта — змейка (по умолчанию) или по одному…",
+    "screen.create.captains_ph": "Капитаны — как выбираются два капитана…",
+
+    "screen.manage_list.title": "Управление кастомами",
+    "screen.manage_list.desc_all": "Все активные кастомы на сервере.",
+    "screen.manage_list.desc_own": "Кастомы, которыми вы владеете.",
+    "screen.manage_list.active": "Активные ({n})",
+    "screen.manage_list.empty_own": (
+        "У вас нет активного кастома. Создайте его или попросите суперадмина "
+        "передать вам существующий."
+    ),
+    "screen.manage_list.pick": "Выберите кастом для управления…",
+
+    "screen.manage.title": "Кастом #{custom_id} — {name}",
+    "screen.manage.body": (
+        "{dot} **{state}**  ·  {fmt}  ·  **{size}v{size}**\n"
+        "**Начало:** {start}\n"
+        "**Пул карт:** {pool}\n"
+        "**Драфт:** {draft}\n"
+        "**Капитаны:** {captains} _(задано при создании)_"
+    ),
+    "screen.manage.ready_title": "Идёт проверка готовности",
+    "screen.manage.ready_body": (
+        "Игроки подтверждают участие в канале кастома. **Начать** или "
+        "**Начать принудительно** прервёт проверку и запустит матч."
+    ),
+    "screen.manage.transfer_ph": "Передать владение…",
+
+    "screen.maps.empty": "Карты не настроены — нажмите **Загрузить стандартные**.",
+    "screen.maps.footer": "Отметка карты соревновательной автоматически включает её.",
+    "screen.maps.toggle_ph": "Включить/выключить карты (можно несколько)…",
+    "screen.maps.comp_ph": "Соревновательный пул — отметьте текущую ротацию…",
+    "screen.maps.in_comp": "в соревновательном пуле",
+    "screen.maps.flipped": "**{name}** → {state}",
+    "screen.maps.nothing": "Нечего переключать.",
+
+    "screen.bans.title": "Баны",
+    "screen.bans.desc": "Забаненные игроки не могут записываться на игры этого сервера.",
+    "screen.bans.count": "Забанено ({n})",
+    "screen.bans.pick_hint": "_выберите игрока ниже_",
+    "screen.bans.player_ph": "Игрок…",
+
+    "screen.audit.title": "Журнал действий",
+    "screen.audit.empty": "_Записей пока нет._",
+    "screen.audit.footer": "15 последних записей",
+
+    "screen.roles.title": "Роли бота",
+    "screen.roles.desc": (
+        "Роли, выданные здесь, действуют вдобавок к Discord-ролям `ADMIN_ROLE` / "
+        "`SUPERADMIN_ROLE` из `.env`."
+    ),
+    "screen.roles.count": "{role} ({n})",
+    "screen.roles.none": "_не выдано_",
+    "screen.roles.selected": "{member} → **{role}**",
+    "screen.roles.pick_hint": "_выберите участника_",
+    "screen.roles.member_ph": "Участник…",
+    "screen.roles.role_ph": "Роль…",
+
+    "screen.language.title": "Язык",
+    "screen.language.desc": (
+        "Язык, на котором бот говорит на этом сервере. Действует для всех: "
+        "панели, меню, сообщения матча и ошибки."
+    ),
+    "screen.language.current": "Текущий",
+    "screen.language.pick": "Выберите язык…",
+
+    "confirm.force_footer": (
+        "Принудительный режим также обходит защиту от удаления идущей игры "
+        "(отключает всех из голосовых каналов команд)."
+    ),
+    "confirm.delete.title": "Удалить кастом #{custom_id}?",
+    "confirm.delete.desc": (
+        "**{name}** — его канал, голосовые каналы и очередь будут удалены. "
+        "Это необратимо."
+    ),
+    "confirm.prune.title": "Удалить все кастомы на этом сервере?",
+    "confirm.prune.desc": (
+        "**{n} активных** кастомов плюс все завершённые, вместе с их каналами "
+        "и очередями. Это необратимо."
+    ),
+
+    # ------------------------------------------------------------- карты ---
+    "maps.added": "Добавлена карта **{name}**.",
+    "maps.err.empty": "Название карты не может быть пустым.",
+    "maps.err.exists": "**{name}** уже есть в пуле.",
+    "maps.comp_set": "Соревновательный пул: **{maps}** (карты включены).",
+    "maps.comp_cleared": "Соревновательный пул очищен.",
+    "maps.comp_unknown": "\nНет в списке карт этого сервера (пропущено): {maps}",
+    "maps.seeded": "Добавлено карт: {n}.",
+    "maps.already_seeded": "Пул уже заполнен.",
+    "maps.none_configured": "Карты не настроены. Админ: `/maps seed` загрузит стандартные.",
+    "maps.seeded_ok": "Стандартный пул загружен.",
+    "maps.added_cmd": "Добавлена карта {name}.",
+    "maps.removed": "Карта {name} удалена.",
+    "maps.no_such": "Такой карты нет.",
+    "maps.toggled": "Карта {name} теперь {state}.",
+    "maps.list_line": "{dot} {name}",
+    "maps.list_line_comp": "{dot} {name} — соревновательная",
+
+    # -------------------------------------------------------------- баны ---
+    "bans.banned": "Бан выдан: {member}.",
+    "bans.already_banned": "Бан уже был выдан: {member}.",
+    "bans.unbanned": "Бан снят: {member}.",
+    "bans.not_banned": "Бана не было: {member}.",
+    "bans.reason_suffix": "\nПричина: {reason}",
+    "bans.none": "Забаненных игроков нет.",
+
+    "roles.granted": "Роль **{role}** выдана: {member}.",
+    "roles.revoked": "Роль **{role}** снята: {member}.",
+
+    "audit.none": "Записей в журнале нет.",
+    "audit.line": "`{ts}` <@{actor_id}> **{action}** {target}",
+
+    # ---------------------------------------------------------- капитаны ---
+    "captain.random": "Случайно",
+    "captain.highest_rr": "Наибольший RR",
+    "captain.highest_peak": "Наивысший пиковый ранг",
+    "captain.manual": "Выбраны вручную",
+    "captain.volunteer": "Добровольцы",
+    "captain.vote": "Голосованием",
+    "captain.help.random": "два случайных игрока из лобби",
+    "captain.help.highest_rr": "двое с наибольшим текущим RR — нужны заполненные профили",
+    "captain.help.highest_peak": "двое с наивысшим пиковым рангом — нужны заполненные профили",
+
+    # ------------------------------------------------------------- драфт ---
+    "draft.mode.snake": "Змейка (A, BB, AA, …)",
+    "draft.mode.alternate": "По одному (A, B, A, B, …)",
+    "draft.snake.label": "Драфт змейкой",
+    "draft.snake.desc": "A, BB, AA, BB … — сглаживает преимущество первого пика",
+    "draft.alternate.label": "По одному",
+    "draft.alternate.desc": "A, B, A, B … — строго по очереди",
+    "draft.title.snake": "Драфт змейкой",
+    "draft.title.alternate": "Драфт (по одному)",
+    "draft.title": "{mode} — матч #{match_id}",
+    "draft.on_clock": "Ход",
+    "draft.on_clock_value": "<@{captain_id}> ({side}) — осталось {n}",
+    "draft.complete": "Готово",
+    "draft.complete_value": "Все игроки распределены.",
+    "draft.pick_ph": "Выберите игрока…",
+
+    # ------------------------------------------------------------ монета ---
+    "coin.title": "Жеребьёвка — матч #{match_id}",
+    "coin.heads": "Орёл",
+    "coin.tails": "Решка",
+    "coin.calling": "Загадывает",
+    "coin.call": "Загадано",
+    "coin.landed": "Выпало",
+    "coin.winner": "Победитель жеребьёвки",
+    "coin.wait_call": "орёл или решка",
+    "coin.wait_letter": (
+        "<@{captain_id}> — **Команда A** или **Команда B**\n"
+        "Команда A драфтит первой и банит первой."
+    ),
+    "coin.teams_value": (
+        "Команда A <@{cap_a}> · Команда B <@{cap_b}>\n"
+        "Команда A драфтит первой и банит первой."
+    ),
+
+    # -------------------------------------------------------------- вето ---
+    "veto.title": "Вето карт — матч #{match_id}",
+    "veto.remaining": "Осталось",
+    "veto.picked": "Выбрано",
+    "veto.sides": "Стороны",
+    "veto.turn": "Ход",
+    "veto.attack": "атака",
+    "veto.defence": "защита",
+    "veto.action.ban": "бан",
+    "veto.action.pick": "пик",
+    "veto.turn_action": "<@{captain_id}> — {action}",
+    "veto.turn_side": "<@{captain_id}> выбирает сторону на карте **{map}**",
+    "veto.side_text": "**{map}** — Команда {chooser} {choice}, Команда {other} {flip}",
+    "veto.result_maps": "Выбор карт завершён{note}.\n{lines}",
+    "veto.result_simple": "Вето завершено{note}. Карты: **{maps}**",
+
+    # -------------------------------------------------------- готовность ---
+    "ready.title": "Проверка готовности — кастом #{custom_id} · {name}",
+    "ready.round": " (раунд {n})",
+    "ready.desc": (
+        "Все ниже должны подтвердить готовность до начала матча.\nЗакроется {when}."
+    ),
+    "ready.count": "Готовы {n}/{total}",
+    "ready.footer": "**Не могу играть** сразу освобождает ваше место для запасного.",
+    "ready.ping": "**Проверка готовности** — {mentions}",
+    "ready.posted": (
+        "Проверка готовности отправлена в {channel} — у {n} игрок(ов) есть {seconds} с."
+    ),
+    "ready.resolving": "Обрабатываем…",
+    "ready.cancel.manual": "Прервано — {actor} запустил матч вручную.",
+    "ready.cancel.deleted": "Кастом удалён.",
+    "ready.outcome.all_ready": "✅ Все готовы — запускаем матч.",
+    "ready.outcome.incomplete": "⚠️ Подтвердили не все. Исключены: {dropped}",
+    "ready.subs_round": (
+        "{dropped} потеряли места — запасные подняты. "
+        "Запускаем раунд проверки **{round}**."
+    ),
+    "ready.failed": (
+        "⚠️ **Проверка готовности не пройдена** для кастома #{custom_id} — {why}. "
+        "Мест занято {filled}/{size}; запись снова открыта. "
+        "Админ может повторить проверку или запустить принудительно."
+    ),
+    "ready.why.no_subs": "запасных не было",
+    "ready.why.rounds": "остановились после {n} раундов",
+
+    # -------------------------------------------------------------- матч ---
+    "match.announce": (
+        "**Матч #{match_id}** ({per_side}v{per_side}) — "
+        "капитаны <@{cap_a}> против <@{cap_b}> ({method})."
+    ),
+    "match.subs": (
+        "**Запасные (не в этом матче):** {subs} — вы записались после того, "
+        "как места закончились."
+    ),
+    "match.starting": (
+        "Матч #{match_id} запускается ({per_side}v{per_side}) в {channel}. "
+        "Капитаны: <@{cap_a}> против <@{cap_b}> — жеребьёвка решит, кто Команда A."
+    ),
+    "match.result_recorded": "Записано {map}: A {score_a}–{score_b} B (победа {winner}).",
+
+    # -------------------------------------------------------------- лобби ---
+    "lobby.title": "Лобби матча — кастом #{custom_id}",
+    "lobby.full_title": "{name} — матч #{match_id} ({fmt})",
+    "lobby.team_cap": "{team} (кап. {captain})",
+    "lobby.party_code": "Код лобби",
+    "lobby.no_code": "_ещё не задан_",
+    "lobby.voice": "Голосовые каналы",
+    "lobby.map_line": "**{index}. {map}** — Команда A {side_a} · Команда B {side_b}",
+    "lobby.map_line_plain": "**{index}. {map}**",
+    "lobby.footer": "Любой участник кастома может задать код или завершить матч.",
+    "code.updated": "Код лобби обновлён.",
+    "modal.create.title": "Создать кастом",
+    "modal.create.name": "Название",
+    "modal.create.name_ph": "Пятничный 5x5",
+    "modal.create.fmt": "Формат (BO1/BO3/BO5)",
+    "modal.create.team_size": "Размер команды (1-5)",
+    "modal.create.start": "Начало — пусто = ASAP",
+    "modal.create.start_ph": "20:00 (время сервера) или ISO — пусто, чтобы играть сейчас",
+    "modal.addmap.title": "Добавить карту",
+    "modal.addmap.name": "Название карты",
+    "modal.addmap.name_ph": "Ascent",
+    "modal.ban.title": "Забанить игрока",
+    "modal.ban.reason": "Причина (необязательно)",
+    "modal.code.title": "Код лобби",
+    "modal.code.label": "Код лобби / группы",
+    "modal.code.ph": "7F3K2",
+    "code.set": "Код лобби для кастома #{custom_id} задан.",
+    "code.announced": "**Код лобби — кастом #{custom_id}:** `{code}`  (задал {actor})",
+
+    # ------------------------------------------------------------ профиль ---
+    "profile.registered": "Профиль сохранён: **{tag}**.",
+    "profile.none": "Профиль не зарегистрирован.",
+    "profile.title": "Профиль — {name}",
+    "profile.riot_id": "Riot ID",
+    "profile.main_role": "Основная роль",
+    "profile.rank": "Ранг",
+    "profile.rr": "RR",
+    "profile.peak": "Пик",
+    "profile.elo": "Эло",
+    "profile.role.duelist": "Дуэлянт",
+    "profile.role.controller": "Контроллер",
+    "profile.role.initiator": "Зачинщик",
+    "profile.role.sentinel": "Страж",
+    "profile.role.flex": "Флекс",
+
+    # ----------------------------------------------------------- статистика ---
+    "stats.none": "Статистики пока нет.",
+    "stats.title": "Ваша статистика",
+    "stats.played": "Сыграно",
+    "stats.wl": "П/П",
+    "stats.mvps": "MVP",
+    "stats.leader_line": "{rank}. <@{user_id}> — побед: {wins}",
+
+    # ------------------------------------------------------------ очередь ---
+    "queue.none": "У этого кастома нет очереди.",
+    "queue.empty": "_пусто_",
+    "queue.header": "**Очередь кастома #{custom_id}** ({n}/{size})",
+    "queue.waitlist": "\n**Лист ожидания:** {members}",
+
+    # --------------------------------------------------------------- язык ---
+    "lang.changed": "Язык сервера установлен: **{language}**.",
+    "lang.unchanged": "Язык сервера уже **{language}**.",
+    "lang.unknown": "Неизвестный язык `{lang}`. Доступны: {available}.",
+    "lang.name.en": "английский",
+    "lang.name.ru": "русский",
+
+    # ----------------------------------------------------- описания команд ---
+    "cmd.panel.desc": "Разместить живую панель управления в этом канале.",
+    "cmd.panel.tier": "Какую панель разместить. По умолчанию — настроенная для этого канала.",
+    "cmd.panel.choice.player": "Кастомы — для всех",
+    "cmd.panel.choice.admin": "Админ",
+    "cmd.panel.choice.superadmin": "Суперадмин",
+
+    "cmd.language.desc": "Задать язык бота на этом сервере (суперадмин).",
+    "cmd.language.param": "Язык для всех сообщений на этом сервере.",
+
+    "cmd.custom.create.desc": "Создать кастом (админ, в канале конфигурации).",
+    "cmd.custom.create.name": "Название кастома",
+    "cmd.custom.create.format": "BO1/BO3/BO5",
+    "cmd.custom.create.start": "ЧЧ:ММ (время сервера) или ISO — пусто = начать сейчас",
+    "cmd.custom.create.maps": "Пул через запятую или `competitive` (пусто — все включённые карты)",
+    "cmd.custom.create.team_size": "Игроков в команде: 1 (1v1) … 5 (5v5). По умолчанию 5.",
+    "cmd.custom.create.draft": "Как драфтить игроков: змейкой или по одному. По умолчанию змейкой.",
+    "cmd.custom.create.captains": "Как выбираются капитаны при старте. По умолчанию случайно.",
+    "cmd.custom.register.desc": "Записаться на кастом по id.",
+    "cmd.custom.leave.desc": "Выйти из кастома по id.",
+    "cmd.custom.list.desc": "Список активных кастомов.",
+    "cmd.custom.transfer.desc": "Передать владение кастомом.",
+    "cmd.custom.delete.desc": "Удалить кастом по id (владелец/суперадмин).",
+    "cmd.custom.delete.force": "Обход защиты от удаления идущей игры (суперадмин)",
+    "cmd.custom.prune.desc": "Удалить ВСЕ кастомы (суперадмин).",
+
+    "cmd.match.start.desc": "Запустить кастом целиком: капитаны → драфт → вето.",
+    "cmd.match.forcestart.desc": "Ручной старт: начать текущим составом записавшихся.",
+    "cmd.match.custom_id": "Кастом для запуска",
+    "cmd.match.captains": "Переопределить способ выбора капитанов только для этого запуска",
+    "cmd.match.captain_a": "(только вручную) капитан Команды A",
+    "cmd.match.captain_b": "(только вручную) капитан Команды B",
+    "cmd.match.readycheck.desc": "Проверка готовности: каждый из основы должен подтвердить.",
+    "cmd.match.readycheck.custom_id": "Кастом для проверки",
+    "cmd.match.result.desc": "Внести результат карты (капитан или админ).",
+    "cmd.match.partycode.desc": "Задать/обновить код лобби (любой участник). Виден всем.",
+    "cmd.match.partycode.custom_id": "Кастом, к матчу которого это относится",
+    "cmd.match.partycode.code": "Код лобби/группы",
+    "cmd.match.end.desc": "Завершить матч: отметить готовым и удалить его каналы.",
+    "cmd.match.end.custom_id": "Кастом, матч которого завершить",
+
+    "cmd.maps.list.desc": "Показать пул карт сервера.",
+    "cmd.maps.seed.desc": "Загрузить стандартный пул Valorant.",
+    "cmd.maps.competitive.desc": "Задать соревновательный пул (админ). Пусто — очистить.",
+    "cmd.maps.competitive.maps": "Карты текущей ротации через запятую — пусто, чтобы очистить",
+    "cmd.maps.add.desc": "Добавить карту.",
+    "cmd.maps.remove.desc": "Удалить карту.",
+    "cmd.maps.toggle.desc": "Включить/выключить карту.",
+
+    "cmd.admin.grant.desc": "Выдать роль бота (админ/суперадмин — только суперадмин).",
+    "cmd.admin.revoke.desc": "Снять роль бота.",
+    "cmd.admin.audit.desc": "Посмотреть последние записи журнала.",
+    "cmd.admin.ban.desc": "Запретить игроку записываться на будущие игры.",
+    "cmd.admin.unban.desc": "Снять бан с игрока.",
+    "cmd.admin.bans.desc": "Список забаненных игроков.",
+
+    "cmd.profile.register.desc": "Зарегистрировать профиль с вашим Riot ID.",
+    "cmd.profile.register.riot_id": "Ваш Riot ID, например TenZ#NA1",
+    "cmd.profile.register.main_role": "Предпочитаемая роль (необязательно)",
+    "cmd.profile.register.cur_rank": "Необязательно, например Ascendant 2",
+    "cmd.profile.register.cur_rr": "Необязательно, RR 0-100",
+    "cmd.profile.register.peak_rank": "Необязательно, например Immortal 1",
+    "cmd.profile.view.desc": "Посмотреть профиль игрока.",
+
+    "cmd.stats.me.desc": "Ваша статистика.",
+    "cmd.stats.leaderboard.desc": "Таблица лидеров по победам.",
+
+    "cmd.queue.status.desc": "Показать статус очереди кастома.",
+}
