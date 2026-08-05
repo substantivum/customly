@@ -9,6 +9,9 @@ from discord.ext import commands
 from bot.config import settings
 from bot.core.errors import BotError
 from bot.db import init_db
+from bot.i18n import t
+from bot.i18n.translator import BotTranslator
+from bot.i18n.ui import LocalizedTree
 from bot.tasks import start as start_scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -34,6 +37,9 @@ class ValBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
+            # Binds the guild's language onto the task handling each interaction,
+            # before any command callback runs. See bot.i18n.ui.
+            tree_cls=LocalizedTree,
             # User-supplied strings (party codes, custom/map names, Riot IDs) are
             # echoed into public channels — never let them ping @everyone/@here
             # or a role. <@id> mentions the bot builds itself still work.
@@ -44,6 +50,10 @@ class ValBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await init_db()
+        # Localizes command/parameter/choice descriptions. Discord resolves
+        # these from each *user's client locale*, not the server setting — the
+        # runtime text the bot sends is what follows `/language`.
+        await self.tree.set_translator(BotTranslator())
         from bot.core.views import (
             EndCustomButton,
             LeaveButton,
@@ -81,7 +91,9 @@ class ValBot(commands.Bot):
 
 async def _on_app_error(itx: discord.Interaction, error: Exception):
     err = getattr(error, "original", error)
-    msg = str(err) if isinstance(err, BotError) else "Something went wrong."
+    # The tree's interaction_check already bound the guild language, so both the
+    # BotError text and the fallback come out in the right one.
+    msg = str(err) if isinstance(err, BotError) else t("error.generic")
     if isinstance(err, BotError):
         log.info("Handled BotError: %s", err)
     else:

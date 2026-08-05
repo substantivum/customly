@@ -6,29 +6,31 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from bot.core.embeds import VAL_RED
+from bot.core.embeds import EMBED_COLOR
 from bot.core.ui import reply
 from bot.db import SessionLocal
 from bot.db.models import PlayerStats
+from bot.i18n import t
+from bot.i18n.translator import L
 
 
 class StatsCog(commands.GroupCog, name="stats"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(description="Your stats.")
+    @app_commands.command(description=L("cmd.stats.me.desc"))
     async def me(self, itx: discord.Interaction):
         async with SessionLocal() as s:
             ps = await s.get(PlayerStats, (itx.guild_id, 0, itx.user.id))
         if not ps:
-            return await reply(itx, "No stats yet.")
-        e = discord.Embed(title="Your stats", color=VAL_RED)
-        e.add_field(name="Played", value=ps.played)
-        e.add_field(name="W/L", value=f"{ps.wins}/{ps.losses}")
-        e.add_field(name="MVPs", value=ps.mvps)
+            return await reply(itx, t("stats.none"))
+        e = discord.Embed(title=t("stats.title"), color=EMBED_COLOR)
+        e.add_field(name=t("stats.played"), value=ps.played)
+        e.add_field(name=t("stats.wl"), value=f"{ps.wins}/{ps.losses}")
+        e.add_field(name=t("stats.mvps"), value=ps.mvps)
         await reply(itx, embed=e)
 
-    @app_commands.command(description="Wins leaderboard.")
+    @app_commands.command(description=L("cmd.stats.leaderboard.desc"))
     async def leaderboard(self, itx: discord.Interaction):
         async with SessionLocal() as s:
             rows = await s.execute(
@@ -37,8 +39,9 @@ class StatsCog(commands.GroupCog, name="stats"):
             )
             top = [r[0] for r in rows.all()]
         if not top:
-            return await reply(itx, "No stats yet.")
-        lines = [f"{i+1}. <@{p.user_id}> — {p.wins} wins" for i, p in enumerate(top)]
+            return await reply(itx, t("stats.none"))
+        lines = [t("stats.leader_line", rank=i + 1, user_id=p.user_id, wins=p.wins)
+                 for i, p in enumerate(top)]
         await reply(itx, "\n".join(lines))
 
 

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.i18n import t
+
 
 @dataclass
 class VetoStep:
@@ -46,22 +48,23 @@ _SEQUENCES: dict[str, tuple[tuple[str, str | None], ...]] = {
 def pool_requirement(fmt: str) -> str:
     """How big a pool the format wants, phrased for a captain to read."""
     if fmt in POOL_EXACT:
-        return f"exactly {POOL_EXACT[fmt]} maps"
-    return f"at least {POOL_MIN[fmt]} maps"
+        return t("veto.pool.exact", n=POOL_EXACT[fmt])
+    return t("veto.pool.min", n=POOL_MIN[fmt])
 
 
 def check_pool(fmt: str, pool_size: int) -> None:
     """Raise unless a pool of `pool_size` can run a `fmt` veto."""
     if fmt not in FORMATS:
-        raise ValueError(f"Format must be one of: {', '.join(FORMATS)}.")
+        raise ValueError(t("error.veto_format", formats=", ".join(FORMATS)))
     ok = (
         pool_size == POOL_EXACT[fmt] if fmt in POOL_EXACT
         else pool_size >= POOL_MIN[fmt]
     )
     if not ok:
-        msg = f"{fmt} needs {pool_requirement(fmt)} in the pool (got {pool_size})."
+        msg = t("error.veto_pool", fmt=fmt, requirement=pool_requirement(fmt),
+                n=pool_size)
         if fmt in POOL_EXACT:
-            msg += " Use `competitive` for the current competitive pool."
+            msg += t("error.veto_pool_hint")
         raise ValueError(msg)
 
 

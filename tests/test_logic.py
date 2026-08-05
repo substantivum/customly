@@ -375,10 +375,10 @@ def test_ready_check_ignores_people_who_are_not_playing():
 # ------------------------------------------------------- captain selection ---
 def test_captain_method_choices_exclude_manual():
     """`manual` names two players, so it can't be fixed before anyone signs up."""
-    from bot.services.draft import CAPTAIN_METHOD_LABEL, CREATE_METHODS
+    from bot.services.draft import CAPTAIN_METHOD_KEY, CREATE_METHODS
 
     assert "manual" not in CREATE_METHODS
-    assert all(m in CAPTAIN_METHOD_LABEL for m in CREATE_METHODS)
+    assert all(m in CAPTAIN_METHOD_KEY for m in CREATE_METHODS)
 
 
 def test_choose_captains_by_rr_and_peak():

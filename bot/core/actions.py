@@ -20,7 +20,7 @@ from bot.core.controllers import (
     ReadyCheckController,
     VetoController,
 )
-from bot.core.embeds import VAL_RED, custom_registration_embed
+from bot.core.embeds import DASH, EMBED_COLOR, custom_registration_embed
 from bot.core.errors import BotError
 from bot.core.naming import channel_slug
 from bot.core.views import (
@@ -40,6 +40,7 @@ from bot.db.models import (
     Queue,
     User,
 )
+from bot.i18n import t
 from bot.services import custom as custom_svc
 from bot.services import draft as draft_svc
 from bot.services import queue_svc, voice
@@ -66,10 +67,8 @@ def flow_step(channel, what: str):
                 log.exception("match flow failed before %s", what)
                 try:
                     await channel.send(
-                        f"⚠️ Couldn't continue to **{what}** — "
-                        f"`{type(e).__name__}: {e}`.\n"
-                        f"Ask an admin to end this custom and start it again "
-                        f"(the error is in the bot log)."
+                        t("error.flow_step", what=what,
+                          error=f"{type(e).__name__}: {e}")
                     )
                 except discord.HTTPException:
                     pass
@@ -118,7 +117,7 @@ def parse_start(raw: str, tz_offset: int | None = None) -> datetime:
             dt = dt.replace(tzinfo=tz)
         return dt.astimezone(timezone.utc)
     except ValueError:
-        raise BotError("Start must be `HH:MM` or ISO `2026-06-24T20:00`.")
+        raise BotError(t("error.bad_start"))
 
 
 # ------------------------------------------------------- create custom flow ---
@@ -239,11 +238,12 @@ async def _reg_message(
             return await chan.fetch_message(custom.reg_message)
         except discord.HTTPException:
             pass
-    title = f"🎮 Custom #{custom.custom_id}"
+    # Language-independent: the id is in the title in every language.
+    marker = f"#{custom.custom_id}"
     try:
         async for m in chan.history(limit=50, oldest_first=True):
             if (m.author.id == guild.me.id and m.embeds
-                    and (m.embeds[0].title or "").startswith(title)):
+                    and marker in (m.embeds[0].title or "")):
                 async with SessionLocal() as s:
                     db_c = await s.get(Custom, custom.custom_id)
                     if db_c:
@@ -289,11 +289,10 @@ async def join_custom(
     await refresh_registration_embed(guild, custom_id, message)
     board.schedule(guild)
     if wait_pos:
-        return (f"🪑 Custom #{custom_id} is full — you're **#{wait_pos} on the "
-                f"waitlist** and move up automatically if someone drops out.")
+        return t("custom.joined_waitlist", custom_id=custom_id, position=wait_pos)
     # Taking the last seat opens the ready check for everyone.
     await maybe_auto_ready_check(guild, custom_id)
-    return f"Registered for Custom #{custom_id} ✅ — watch for the ready check."
+    return t("custom.joined", custom_id=custom_id)
 
 
 async def leave_custom(
@@ -308,8 +307,7 @@ async def leave_custom(
         if isinstance(chan, discord.TextChannel):
             try:
                 await chan.send(
-                    f"🪑 <@{promoted}> — a seat opened up in **{c.name}**, "
-                    f"you're in the game now."
+                    t("custom.promoted_channel", user_id=promoted, name=c.name)
                 )
             except discord.HTTPException:
                 pass
@@ -317,12 +315,12 @@ async def leave_custom(
         if member:
             try:
                 await member.send(
-                    f"🪑 You moved off the waitlist into **Custom #{custom_id} — "
-                    f"{c.name}** in **{guild.name}**. You're playing."
+                    t("custom.promoted_dm", custom_id=custom_id, name=c.name,
+                      guild=guild.name)
                 )
             except discord.HTTPException:
                 pass
-    return f"Left Custom #{custom_id}."
+    return t("custom.left", custom_id=custom_id)
 
 
 # ------------------------------------------------------------- ownership ------
@@ -336,11 +334,12 @@ async def transfer_custom(
     async with SessionLocal() as s:
         c = await custom_svc.get_in_guild(s, custom_id, itx.guild_id)
     if not await can_manage_custom(c, itx.user):
-        raise BotError("Only the owner or a superadmin can transfer this custom.")
+        raise BotError(t("error.transfer_perm"))
     if c.owner_id == new_owner.id:
-        raise BotError(f"{new_owner.display_name} already owns Custom #{custom_id}.")
+        raise BotError(t("error.already_owner", name=new_owner.display_name,
+                         custom_id=custom_id))
     if new_owner.bot:
-        raise BotError("A bot can't own a custom.")
+        raise BotError(t("error.bot_owner"))
 
     c = await custom_svc.transfer(custom_id, new_owner.id)
     await refresh_registration_embed(itx.guild, custom_id)
@@ -348,20 +347,19 @@ async def transfer_custom(
     chan = itx.guild.get_channel(c.reg_channel) if c.reg_channel else None
     # The new owner runs the custom now, so let them talk in its channel.
     await allow_write(chan, new_owner, reason=f"custom {custom_id} owner")
-    note = (f"👑 Ownership of **Custom #{custom_id} — {c.name}** transferred to "
-            f"{new_owner.mention} by {itx.user.mention}.")
+    note = t("custom.transfer_note", custom_id=custom_id, name=c.name,
+             new_owner=new_owner.mention, actor=itx.user.mention)
     if isinstance(chan, discord.TextChannel):
         try:
             await chan.send(note)
         except discord.HTTPException:
             pass
     try:
-        where = chan.mention if isinstance(chan, discord.TextChannel) else "its channel"
+        where = (chan.mention if isinstance(chan, discord.TextChannel)
+                 else t("common.its_channel"))
         await new_owner.send(
-            f"👑 You now own **Custom #{custom_id} — {c.name}** in "
-            f"**{itx.guild.name}** (handed over by {itx.user.display_name}).\n"
-            f"You can start, force start, end, transfer or delete it from "
-            f"**Admin panel → Manage customs**, or in {where}."
+            t("custom.transfer_dm", custom_id=custom_id, name=c.name,
+              guild=itx.guild.name, actor=itx.user.display_name, where=where)
         )
     except discord.HTTPException:
         pass  # DMs closed — the channel note above still tells them
@@ -376,7 +374,7 @@ async def transfer_custom(
 async def _queue_for_custom(custom_id: int) -> Queue:
     q = await queue_svc.queue_for_custom(custom_id)
     if not q:
-        raise BotError("No queue for this custom.")
+        raise BotError(t("error.no_queue"))
     return q
 
 
@@ -425,11 +423,7 @@ async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
                                    cap_a=cap_a, cap_b=cap_b)
     except discord.HTTPException as e:
         log.warning("team VCs for custom %s failed: %s", custom.custom_id, e)
-        await channel.send(
-            f"⚠️ Couldn't create the team voice channels — `{e.text or e}`. "
-            f"Carrying on with the veto; make them by hand or free up the "
-            f"customs category, then start the next one."
-        )
+        await channel.send(t("error.team_vcs", error=e.text or e))
     async with SessionLocal() as s:
         m = await s.get(Match, match_id)
         m.state = "veto"
@@ -505,35 +499,48 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
         cap = caps.get(side)
         # captain first, then the rest
         ids = sorted(squads[side], key=lambda u: (u != cap, u))
-        return "\n".join(f"{'👑 ' if u == cap else ''}<@{u}>" for u in ids) or "—"
+        return "\n".join(f"<@{u}>" for u in ids) or DASH
 
     e = discord.Embed(
-        title=f"🏁 {c.name} — Match #{c.match_id} ({c.format})", color=VAL_RED
+        title=t("lobby.full_title", name=c.name, match_id=c.match_id, fmt=c.format),
+        color=EMBED_COLOR,
     )
-    e.add_field(name="🟥 Team A", value=_squad("A"), inline=True)
-    e.add_field(name="🟦 Team B", value=_squad("B"), inline=True)
+    # The captain is named in the field header rather than crowned in the list —
+    # the roster below is then just the roster.
+    for side, label in (("A", "common.team_a"), ("B", "common.team_b")):
+        cap = caps.get(side)
+        e.add_field(
+            name=t("lobby.team_cap", team=t(label),
+                   captain=f"<@{cap}>" if cap else DASH),
+            value=_squad(side),
+            inline=True,
+        )
+
     def _map_line(i: int, name: str) -> str:
         chooser, choice = sides.get(name, (None, None))
         if not chooser:
-            return f"**{i}. {name}**"
+            return t("lobby.map_line_plain", index=i, map=name)
         flip = "defence" if choice == "attack" else "attack"
-        return (f"**{i}. {name}** — 🟥 Team A {choice if chooser == 'A' else flip}"
-                f" · 🟦 Team B {choice if chooser == 'B' else flip}")
+        return t(
+            "lobby.map_line", index=i, map=name,
+            side_a=t(f"veto.{choice if chooser == 'A' else flip}"),
+            side_b=t(f"veto.{choice if chooser == 'B' else flip}"),
+        )
 
     e.add_field(
-        name="🗺 Maps",
-        value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or "—",
+        name=t("common.maps"),
+        value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or DASH,
         inline=False,
     )
     e.add_field(
-        name="🔑 Party code",
-        value=f"`{m.party_code}`" if m and m.party_code else "_not set yet_",
+        name=t("lobby.party_code"),
+        value=f"`{m.party_code}`" if m and m.party_code else t("lobby.no_code"),
         inline=True,
     )
     vcs = " / ".join(x.mention for x in voice.team_vcs(guild, c) if x)
     if vcs:
-        e.add_field(name="🔊 Voice", value=vcs, inline=True)
-    e.set_footer(text="Anyone playing this custom can set the code or end the match.")
+        e.add_field(name=t("lobby.voice"), value=vcs, inline=True)
+    e.set_footer(text=t("lobby.footer"))
     return e
 
 
@@ -572,21 +579,17 @@ async def begin_match(
     async with SessionLocal() as s:
         c = await custom_svc.get_in_guild(s, custom_id, guild.id)
     if c.state == "ready":
-        raise BotError(
-            f"A ready check is running on Custom #{custom_id}. Wait for it, or "
-            f"use **Start** / **Force start** to cut it short."
-        )
+        raise BotError(t("error.ready_running", custom_id=custom_id))
     if c.state in ("captains", "veto", "live"):
         raise BotError(
-            f"Custom #{custom_id} already has a match in progress (state: {c.state}). "
-            "Finish it, or run `/custom delete` to reset and start over."
+            t("error.match_in_progress", custom_id=custom_id, state=c.state)
         )
     # Check the pool before anything is created: a custom made before the format
     # got its pool rule would otherwise strand two drafted teams at the veto.
     try:
         veto_svc.check_pool(c.format, len(json.loads(c.map_pool)))
     except ValueError as e:
-        raise BotError(f"{e} Recreate the custom with a pool that fits.")
+        raise BotError(t("error.pool_recreate", reason=e))
     # The method is fixed when the custom is created; `captains` overrides it
     # only where a caller genuinely needs to (e.g. `/match start captains:manual`).
     captains = captains or c.captain_method or "random"
@@ -600,22 +603,19 @@ async def begin_match(
     if allow_partial:
         n = len(member_ids)
         if n < 2 or n % 2 != 0:
-            raise BotError(
-                f"Manual start needs an even number of players ≥ 2 (have {n})."
-            )
+            raise BotError(t("error.partial_even", n=n))
     elif len(member_ids) < q.size:
         raise BotError(
-            f"Queue not full ({len(member_ids)}/{q.size}). "
-            "Use force-start to begin with the current players."
+            t("error.queue_not_full", have=len(member_ids), size=q.size)
         )
 
     if captains == "manual":
         if not manual:
-            raise BotError("Manual captains: provide both captains.")
+            raise BotError(t("error.manual_both"))
         if manual[0] == manual[1]:
-            raise BotError("Captains must be two different players.")
+            raise BotError(t("error.manual_distinct"))
         if not set(manual) <= set(member_ids):
-            raise BotError("Both captains must be registered in this custom.")
+            raise BotError(t("error.manual_registered"))
 
     async with SessionLocal() as s:
         match = Match(guild_id=guild.id, custom_id=custom_id, format=c.format,
@@ -640,7 +640,7 @@ async def begin_match(
     # custom's own channel.
     channel = guild.get_channel(c.reg_channel) if c.reg_channel else None
     if channel is None:
-        raise BotError("This custom has no channel left to run the match in.")
+        raise BotError(t("error.no_channel"))
 
     # Let the two captains type in the custom channel; everyone else stays read-only
     # (admins and the owner already got write access when the channel was made).
@@ -649,15 +649,12 @@ async def begin_match(
 
     # No letters yet on purpose — the coin toss below decides who is Team A.
     await channel.send(
-        f"🎬 **Match #{match_id}** ({per_side}v{per_side}) — "
-        f"captains <@{cap_a}> vs <@{cap_b}> "
-        f"({draft_svc.CAPTAIN_METHOD_LABEL.get(captains, captains)})."
+        t("match.announce", match_id=match_id, per_side=per_side,
+          cap_a=cap_a, cap_b=cap_b, method=draft_svc.captain_label(captains))
     )
     if subs:
         await channel.send(
-            "🪑 **Subs (not in this match):** "
-            + ", ".join(f"<@{u}>" for u in subs)
-            + " — you signed up after the seats filled."
+            t("match.subs", subs=", ".join(f"<@{u}>" for u in subs))
         )
 
     # Coin toss first: a random captain calls it and the winner takes Team A or
@@ -703,18 +700,18 @@ async def start_match(
     async with SessionLocal() as s:
         c = await custom_svc.get_in_guild(s, custom_id, itx.guild_id)
     if not await can_manage_custom(c, itx.user):
-        raise BotError("Only the owner or a superadmin can start this custom.")
+        raise BotError(t("error.start_perm"))
 
     # A manual start overrules a running ready check — that's the whole point of
     # having both ways in.
     await cancel_ready_check(
-        custom_id, f"▶️ Cut short — {itx.user.mention} started the match manually."
+        custom_id, t("ready.cancel.manual", actor=itx.user.mention)
     )
 
     manual = None
     if captains == "manual":
         if not (captain_a and captain_b):
-            raise BotError("Manual captains: provide both captains.")
+            raise BotError(t("error.manual_both"))
         manual = (captain_a.id, captain_b.id)
 
     match_id, channel, cap_a, cap_b, per_side = await begin_match(
@@ -722,8 +719,8 @@ async def start_match(
         allow_partial=allow_partial, actor_id=itx.user.id,
     )
     await itx.followup.send(
-        f"Match #{match_id} starting ({per_side}v{per_side}) in {channel.mention}. "
-        f"Captains: <@{cap_a}> vs <@{cap_b}> — the coin toss decides who's Team A.",
+        t("match.starting", match_id=match_id, per_side=per_side,
+          channel=channel.mention, cap_a=cap_a, cap_b=cap_b),
         ephemeral=True,
     )
 
@@ -768,22 +765,17 @@ async def start_ready_check(
     async with SessionLocal() as s:
         c = await custom_svc.get_in_guild(s, custom_id, guild.id)
     if custom_id in ACTIVE_READY:
-        raise BotError(f"A ready check is already running on Custom #{custom_id}.")
+        raise BotError(t("error.ready_already", custom_id=custom_id))
     if c.state not in ("registration", "full"):
-        raise BotError(
-            f"Custom #{custom_id} is `{c.state}` — a ready check only makes sense "
-            f"before the match starts."
-        )
+        raise BotError(t("error.ready_state", custom_id=custom_id, state=c.state))
     channel = guild.get_channel(c.reg_channel) if c.reg_channel else None
     if not isinstance(channel, discord.TextChannel):
-        raise BotError("This custom has no channel to run a ready check in.")
+        raise BotError(t("error.ready_no_channel"))
 
     r = await custom_svc.roster(custom_id)
     n = len(r.starters)
     if n < 2 or n % 2 != 0:
-        raise BotError(
-            f"A ready check needs an even number of players ≥ 2 (have {n})."
-        )
+        raise BotError(t("error.ready_even", n=n))
 
     deadline = datetime.now(timezone.utc) + timedelta(seconds=settings.ready_check_seconds)
     ctl = ReadyCheckController(custom_id, c.name, r.starters, deadline, round_no)
@@ -797,14 +789,14 @@ async def start_ready_check(
     view.channel = channel
     await _set_state(custom_id, "ready")
     view.message = await channel.send(
-        content=f"🔔 **Ready check** — {ctl.mentions()}", embed=ctl.embed(), view=view
+        content=t("ready.ping", mentions=ctl.mentions()), embed=ctl.embed(), view=view
     )
     view.arm()
     ACTIVE_READY[custom_id] = view
     board.schedule(guild)
     await audit.log(guild.id, actor_id, "ready_check", str(custom_id), round=round_no)
-    return (f"🔔 Ready check posted in {channel.mention} — "
-            f"{n} player(s) have {settings.ready_check_seconds}s to confirm.")
+    return t("ready.posted", channel=channel.mention, n=n,
+             seconds=settings.ready_check_seconds)
 
 
 async def _resolve_ready_check(
@@ -827,7 +819,7 @@ async def _resolve_ready_check(
             pass
 
     if ctl.everyone_ready:
-        await outcome("✅ Everyone ready — starting the match.")
+        await outcome(t("ready.outcome.all_ready"))
         await _set_state(custom_id, "full")
         await begin_match(guild, custom_id, allow_partial=True)
         return
@@ -844,24 +836,22 @@ async def _resolve_ready_check(
 
     r = await custom_svc.roster(custom_id)
     dropped = ", ".join(f"<@{u}>" for u in absent)
-    await outcome(f"⏳ Not everyone confirmed. Dropped: {dropped}")
+    await outcome(t("ready.outcome.incomplete", dropped=dropped))
 
     filled = len(r.starters) == r.size
     if filled and ctl.round_no < MAX_READY_ROUNDS:
         await channel.send(
-            f"🪑 {dropped} lost their seat — subs moved up. Running ready check "
-            f"round **{ctl.round_no + 1}**."
+            t("ready.subs_round", dropped=dropped, round=ctl.round_no + 1)
         )
         return await start_ready_check(guild, custom_id, round_no=ctl.round_no + 1)
 
     await _set_state(custom_id, "full" if filled else "registration")
     board.schedule(guild)
-    why = ("no subs were waiting" if not filled
-           else f"gave up after {MAX_READY_ROUNDS} rounds")
+    why = (t("ready.why.no_subs") if not filled
+           else t("ready.why.rounds", n=MAX_READY_ROUNDS))
     await channel.send(
-        f"⚠️ **Ready check failed** for Custom #{custom_id} — {why}. "
-        f"{len(r.starters)}/{r.size} seats filled; registration is open again. "
-        f"An admin can re-run the check or force start."
+        t("ready.failed", custom_id=custom_id, why=why,
+          filled=len(r.starters), size=r.size)
     )
 
 
@@ -946,15 +936,15 @@ async def set_party_code(
     lobby button passes False because it redraws the lobby embed instead.
     """
     if not await can_play_custom(custom_id, itx.user):
-        raise BotError("Only players registered for this custom (or an admin) can set the code.")
+        raise BotError(t("error.code_perm"))
     match = await active_match_for_custom(custom_id)
     if not match:
-        raise BotError("That custom hasn't started a match yet.")
+        raise BotError(t("error.no_match_yet"))
     # The code is echoed into a public channel inside a code span — strip the
     # characters that would let it break out or inject markdown.
     code = "".join(ch for ch in code.strip() if ch.isalnum() or ch in "-_")[:16]
     if not code:
-        raise BotError("Party code must be alphanumeric (`-` and `_` allowed).")
+        raise BotError(t("error.code_charset"))
     async with SessionLocal() as s:
         m = await s.get(Match, match.match_id)
         m.party_code = code
@@ -965,7 +955,8 @@ async def set_party_code(
     chan = itx.guild.get_channel(chan_id) if chan_id else None
     if announce and chan:
         await chan.send(
-            f"🔑 **Party Code — Custom #{custom_id}:** `{code}`  (set by {itx.user.mention})"
+            t("code.announced", custom_id=custom_id, code=code,
+              actor=itx.user.mention)
         )
     await audit.log(itx.guild_id, itx.user.id, "party_code", str(custom_id))
 
@@ -977,15 +968,15 @@ async def end_custom(itx: discord.Interaction, custom_id: int) -> None:
     The caller must have already answered (or deferred) the interaction — the
     text channel this was clicked in is about to disappear."""
     if not await can_play_custom(custom_id, itx.user):
-        raise BotError("Only players registered for this custom (or an admin) can end it.")
+        raise BotError(t("error.end_perm"))
     async with SessionLocal() as s:
         c = await s.get(Custom, custom_id)
         if not c:
-            raise BotError("Custom not found.")
+            raise BotError(t("error.custom_not_found"))
         if c.state == "done":
-            raise BotError("This custom is already ended.")
+            raise BotError(t("error.already_ended"))
         if c.state in ("registration", "full"):
-            raise BotError("This custom hasn't started yet — delete it instead.")
+            raise BotError(t("error.not_started"))
         if c.match_id:
             m = await s.get(Match, c.match_id)
             if m:

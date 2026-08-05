@@ -1,14 +1,26 @@
-"""Discord UI views (buttons / selects). Kept thin; logic lives in services."""
+"""Discord UI views (buttons / selects). Kept thin; logic lives in services.
+
+Everything user-visible here goes through `t()`, which reads the language from a
+ContextVar. Two places have to put it there by hand:
+
+* `DynamicItem` callbacks. Discord.py rebuilds a bare `discord.ui.View` from the
+  message to dispatch these, so no `interaction_check` of ours ever runs — each
+  callback calls `bind()` itself.
+* The per-turn timers. `asyncio.create_task` copies the current context, so an
+  armed timer *usually* inherits the right language, but a view can also be
+  cancelled from outside any interaction — so the language is captured once at
+  construction and re-entered whenever the view redraws on its own.
+"""
 from __future__ import annotations
 
 import asyncio
-import random
 
 import discord
 
 from bot.config import settings
-from bot.core.embeds import VAL_RED
 from bot.core.errors import BotError
+from bot.i18n import current_lang, lang_context, t
+from bot.i18n.ui import LocalizedModal, LocalizedView, bind
 
 
 class RegisterButton(
@@ -21,18 +33,20 @@ class RegisterButton(
         self.cid = custom_id
         super().__init__(
             discord.ui.Button(
-                label="Register", style=discord.ButtonStyle.success, emoji="✅",
+                label=t("btn.register"), style=discord.ButtonStyle.success,
                 custom_id=f"reg:register:{custom_id}",
             )
         )
 
     @classmethod
     async def from_custom_id(cls, itx, item, match):  # noqa: ANN001
+        await bind(itx)
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
 
+        await bind(itx)
         await itx.response.defer(ephemeral=True)
         try:
             msg = await actions.join_custom(
@@ -51,18 +65,20 @@ class LeaveButton(
         self.cid = custom_id
         super().__init__(
             discord.ui.Button(
-                label="Leave", style=discord.ButtonStyle.secondary, emoji="🚪",
+                label=t("btn.leave"), style=discord.ButtonStyle.secondary,
                 custom_id=f"reg:leave:{custom_id}",
             )
         )
 
     @classmethod
     async def from_custom_id(cls, itx, item, match):  # noqa: ANN001
+        await bind(itx)
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
 
+        await bind(itx)
         await itx.response.defer(ephemeral=True)
         try:
             msg = await actions.leave_custom(
@@ -76,22 +92,24 @@ class LeaveButton(
 def registration_view(custom_id: int) -> discord.ui.View:
     """Build the registration view for a custom. Buttons are persistent, so they
     keep working after a bot restart once add_dynamic_items() is called on boot."""
-    v = discord.ui.View(timeout=None)
+    v = LocalizedView(timeout=None)
     v.add_item(RegisterButton(custom_id))
     v.add_item(LeaveButton(custom_id))
     return v
 
 
 # ------------------------------------------------------------ match lobby ---
-class PartyCodeModal(discord.ui.Modal, title="Party code"):
+class PartyCodeModal(LocalizedModal):
     """Set the code, then redraw the lobby message the button lives on."""
 
-    code = discord.ui.TextInput(label="Party / group code", placeholder="7F3K2", max_length=16)
-
     def __init__(self, custom_id: int, message: discord.Message | None = None):
-        super().__init__()
+        super().__init__(title=t("modal.code.title"))
         self.cid = custom_id
         self.message = message
+        self.code = discord.ui.TextInput(
+            label=t("modal.code.label"), placeholder=t("modal.code.ph"), max_length=16
+        )
+        self.add_item(self.code)
 
     async def on_submit(self, itx: discord.Interaction):
         from bot.core import actions
@@ -109,7 +127,7 @@ class PartyCodeModal(discord.ui.Modal, title="Party code"):
                     await self.message.edit(embed=embed)
                 except discord.HTTPException:
                     pass
-        await itx.followup.send("Party code updated ✅", ephemeral=True)
+        await itx.followup.send(t("code.updated"), ephemeral=True)
 
 
 class PartyCodeButton(
@@ -124,23 +142,22 @@ class PartyCodeButton(
         self.cid = custom_id
         super().__init__(
             discord.ui.Button(
-                label="Set party code", style=discord.ButtonStyle.success, emoji="🔑",
+                label=t("btn.set_code"), style=discord.ButtonStyle.success,
                 custom_id=f"lobby:code:{custom_id}",
             )
         )
 
     @classmethod
     async def from_custom_id(cls, itx, item, match):  # noqa: ANN001
+        await bind(itx)
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
 
+        await bind(itx)
         if not await actions.can_play_custom(self.cid, itx.user):
-            return await itx.response.send_message(
-                "Only players registered for this custom (or an admin) can set the code.",
-                ephemeral=True,
-            )
+            return await itx.response.send_message(t("error.code_perm"), ephemeral=True)
         await itx.response.send_modal(PartyCodeModal(self.cid, itx.message))
 
 
@@ -155,27 +172,24 @@ class EndCustomButton(
         self.cid = custom_id
         super().__init__(
             discord.ui.Button(
-                label="End custom", style=discord.ButtonStyle.danger, emoji="🏁",
+                label=t("btn.end_custom"), style=discord.ButtonStyle.danger,
                 custom_id=f"lobby:end:{custom_id}",
             )
         )
 
     @classmethod
     async def from_custom_id(cls, itx, item, match):  # noqa: ANN001
+        await bind(itx)
         return cls(int(match["cid"]))
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
 
+        await bind(itx)
         if not await actions.can_play_custom(self.cid, itx.user):
-            return await itx.response.send_message(
-                "Only players registered for this custom (or an admin) can end it.",
-                ephemeral=True,
-            )
+            return await itx.response.send_message(t("error.end_perm"), ephemeral=True)
         # Answer before ending — end_custom deletes the channel we're sitting in.
-        await itx.response.send_message(
-            "Ending the custom — voice and this channel will be removed.", ephemeral=True
-        )
+        await itx.response.send_message(t("custom.ending"), ephemeral=True)
         try:
             await actions.end_custom(itx, self.cid)
         except BotError as e:
@@ -184,13 +198,13 @@ class EndCustomButton(
 
 def lobby_view(custom_id: int) -> discord.ui.View:
     """Persistent controls on the match lobby message."""
-    v = discord.ui.View(timeout=None)
+    v = LocalizedView(timeout=None)
     v.add_item(PartyCodeButton(custom_id))
     v.add_item(EndCustomButton(custom_id))
     return v
 
 
-class _TimedView(discord.ui.View):
+class _TimedView(LocalizedView):
     """Base for the run-of-match views: one message, one per-turn timer.
 
     Discord's own view timeout can't be used — it fires once and can't be reset
@@ -204,6 +218,9 @@ class _TimedView(discord.ui.View):
         self.message = None
         self.channel = None
         self._timer = None
+        # The language this match is being played in. A timer firing on its own
+        # has no interaction to read it from.
+        self.lang = current_lang()
 
     def arm(self):
         self._cancel()
@@ -218,7 +235,8 @@ class _TimedView(discord.ui.View):
             await asyncio.sleep(self.SECONDS)
         except asyncio.CancelledError:
             return
-        await self.on_timeout_step()
+        with lang_context(self.lang):
+            await self.on_timeout_step()
 
     async def on_timeout_step(self):    # pragma: no cover - overridden
         raise NotImplementedError
@@ -234,7 +252,7 @@ class _TimedView(discord.ui.View):
 
 
 class ReadyCheckView(_TimedView):
-    """✅ / ❌ for every starter, on one message in the custom's channel.
+    """Ready / Can't play for every starter, on one message in the custom's channel.
 
     Resolves early the moment everyone has answered — waiting out a two-minute
     clock when the answer is already known just annoys the people who did click.
@@ -249,8 +267,8 @@ class ReadyCheckView(_TimedView):
         self.on_resolve = on_resolve
         self.SECONDS = settings.ready_check_seconds
         self._resolved = False
-        self.add_item(self._Answer("Ready", True, discord.ButtonStyle.success, "✅"))
-        self.add_item(self._Answer("Can't play", False, discord.ButtonStyle.danger, "❌"))
+        self.add_item(self._Answer("btn.ready", True, discord.ButtonStyle.success))
+        self.add_item(self._Answer("btn.cant_play", False, discord.ButtonStyle.danger))
 
     async def _apply(self, user_id: int, ok: bool, *, itx):
         self.c.mark(user_id, ok)
@@ -264,7 +282,7 @@ class ReadyCheckView(_TimedView):
         self._resolved = True
         self._cancel()
         self.stop()
-        await self._redraw(self.c.embed(outcome="Resolving…"), itx=itx, view=None)
+        await self._redraw(self.c.embed(outcome=t("ready.resolving")), itx=itx, view=None)
         await self.on_resolve()
 
     async def on_timeout_step(self):
@@ -277,18 +295,19 @@ class ReadyCheckView(_TimedView):
         self._resolved = True
         self._cancel()
         self.stop()
-        await self._redraw(self.c.embed(outcome=note), itx=None, view=None)
+        with lang_context(self.lang):
+            await self._redraw(self.c.embed(outcome=note), itx=None, view=None)
 
     class _Answer(discord.ui.Button):
-        def __init__(self, label: str, ok: bool, style, emoji: str):
-            super().__init__(label=label, style=style, emoji=emoji)
+        def __init__(self, label_key: str, ok: bool, style):
+            super().__init__(label=t(label_key), style=style)
             self.ok = ok
 
         async def callback(self, itx: discord.Interaction):
             view: "ReadyCheckView" = self.view
             if not view.c.is_starter(itx.user.id):
                 return await itx.response.send_message(
-                    "You're not one of the starters for this game.", ephemeral=True
+                    t("error.not_starter"), ephemeral=True
                 )
             await view._apply(itx.user.id, self.ok, itx=itx)
 
@@ -307,11 +326,11 @@ class CoinflipView(_TimedView):
     def _render(self):
         self.clear_items()
         if self.c.stage == "call":
-            self.add_item(self._Choice("Heads", "heads", "🪙"))
-            self.add_item(self._Choice("Tails", "tails", "🌙"))
+            self.add_item(self._Choice("coin.heads", "heads"))
+            self.add_item(self._Choice("coin.tails", "tails"))
         elif self.c.stage == "letter":
-            self.add_item(self._Choice("Team A", "A", "🟥"))
-            self.add_item(self._Choice("Team B", "B", "🟦"))
+            self.add_item(self._Choice("common.team_a", "A"))
+            self.add_item(self._Choice("common.team_b", "B"))
 
     async def _apply(self, value: str, *, itx, auto: bool):
         if self.c.stage == "call":
@@ -336,15 +355,15 @@ class CoinflipView(_TimedView):
         await self._apply(value, itx=None, auto=True)
 
     class _Choice(discord.ui.Button):
-        def __init__(self, label: str, value: str, emoji: str):
-            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
+        def __init__(self, label_key: str, value: str):
+            super().__init__(label=t(label_key), style=discord.ButtonStyle.primary)
             self.value = value
 
         async def callback(self, itx: discord.Interaction):
             view: "CoinflipView" = self.view     # capture before _render detaches us
             if itx.user.id != view.c.actor_id():
                 return await itx.response.send_message(
-                    "Not your call.", ephemeral=True
+                    t("error.not_your_call"), ephemeral=True
                 )
             await view._apply(self.value, itx=itx, auto=False)
 
@@ -365,8 +384,8 @@ class VetoView(_TimedView):
         self.clear_items()
         cur = self.c.current
         if cur is not None and cur.action == "side":
-            self.add_item(self._SideButton("Attack", "attack", "🔫"))
-            self.add_item(self._SideButton("Defence", "defence", "🛡"))
+            self.add_item(self._SideButton("btn.attack", "attack"))
+            self.add_item(self._SideButton("btn.defence", "defence"))
             return
         for m in self.c.remaining:
             self.add_item(self._MapButton(m))
@@ -406,22 +425,22 @@ class VetoView(_TimedView):
             view: "VetoView" = self.view  # capture BEFORE _render detaches this button
             if itx.user.id != view.c.captain_for_turn():
                 return await itx.response.send_message(
-                    "Not your turn to ban/pick.", ephemeral=True
+                    t("error.not_your_turn"), ephemeral=True
                 )
             done = view.c.apply(self.map_name)
             view._render()
             await view._update(done, itx=itx, auto=False)
 
     class _SideButton(discord.ui.Button):
-        def __init__(self, label: str, choice: str, emoji: str):
-            super().__init__(label=label, style=discord.ButtonStyle.primary, emoji=emoji)
+        def __init__(self, label_key: str, choice: str):
+            super().__init__(label=t(label_key), style=discord.ButtonStyle.primary)
             self.choice = choice
 
         async def callback(self, itx: discord.Interaction):
             view: "VetoView" = self.view  # capture BEFORE _render detaches this button
             if itx.user.id != view.c.captain_for_turn():
                 return await itx.response.send_message(
-                    "Not your side to pick.", ephemeral=True
+                    t("error.not_your_side"), ephemeral=True
                 )
             done = view.c.apply_side(self.choice)
             view._render()
@@ -473,12 +492,14 @@ class DraftView(_TimedView):
 
     class _PlayerSelect(discord.ui.Select):
         def __init__(self, options):
-            super().__init__(placeholder="Pick a player…", options=options)
+            super().__init__(placeholder=t("draft.pick_ph"), options=options)
 
         async def callback(self, itx: discord.Interaction):
             view: "DraftView" = self.view  # capture before _render
             if itx.user.id != view.c.captain_for_turn():
-                return await itx.response.send_message("Not your pick.", ephemeral=True)
+                return await itx.response.send_message(
+                    t("error.not_your_pick"), ephemeral=True
+                )
             done = await view.c.pick(int(self.values[0]))
             view._render()
             await view._advance(done, itx=itx)

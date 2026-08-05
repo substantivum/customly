@@ -8,9 +8,10 @@ from datetime import datetime
 import discord
 from sqlalchemy import select
 
-from bot.core.embeds import VAL_RED
+from bot.core.embeds import DASH, EMBED_COLOR
 from bot.db import SessionLocal
 from bot.db.models import DraftPick, MapVeto, MatchMapSide, MatchPlayer, MatchTeam
+from bot.i18n import t
 from bot.services import draft as draft_svc
 from bot.services import veto as veto_svc
 
@@ -114,35 +115,37 @@ class CoinflipController:
 
     # ---------------------------------------------------------------- embed ---
     def embed(self) -> discord.Embed:
-        e = discord.Embed(title=f"🪙 Coin Toss — Match #{self.match_id}", color=VAL_RED)
+        e = discord.Embed(
+            title=t("coin.title", match_id=self.match_id), color=EMBED_COLOR
+        )
         e.add_field(
-            name="Calling",
+            name=t("coin.calling"),
             value=f"<@{self.caller_id}> ({self.caller_side})",
             inline=True,
         )
         if self.call:
-            e.add_field(name="Call", value=self.call.title(), inline=True)
-            e.add_field(name="Landed", value=f"**{self.face.title()}**", inline=True)
+            e.add_field(name=t("coin.call"), value=t(f"coin.{self.call}"), inline=True)
+            e.add_field(name=t("coin.landed"), value=f"**{t(f'coin.{self.face}')}**",
+                        inline=True)
             e.add_field(
-                name="Toss winner",
+                name=t("coin.winner"),
                 value=f"<@{self.captain(self.winner_side)}> ({self.winner_side})",
                 inline=False,
             )
         if self.stage == "call":
-            e.add_field(name="Waiting on", value="heads or tails", inline=False)
+            e.add_field(name=t("common.waiting_on"), value=t("coin.wait_call"),
+                        inline=False)
         elif self.stage == "letter":
             e.add_field(
-                name="Waiting on",
-                value=f"<@{self.captain(self.winner_side)}> — **Team A** or **Team B**\n"
-                      f"Team A drafts first and bans first.",
+                name=t("common.waiting_on"),
+                value=t("coin.wait_letter", captain_id=self.captain(self.winner_side)),
                 inline=False,
             )
         else:
             e.add_field(
-                name="Teams",
-                value=f"🟥 Team A <@{self.cap_a}> · 🟦 Team B <@{self.cap_b}>\n"
-                      f"Team A drafts first and bans first."
-                      + (" _(auto)_" if self.auto else ""),
+                name=t("common.teams"),
+                value=t("coin.teams_value", cap_a=self.cap_a, cap_b=self.cap_b)
+                      + (t("common.auto_note") if self.auto else ""),
                 inline=False,
             )
         return e
@@ -206,27 +209,26 @@ class ReadyCheckController:
                 return "✅"
             return "❌" if u in self.declined else "⬜"
 
-        return "\n".join(f"{mark(u)} <@{u}>" for u in self.starters) or "_nobody_"
+        return "\n".join(f"{mark(u)} <@{u}>" for u in self.starters) or t("common.nobody")
 
     def embed(self, *, outcome: str | None = None) -> discord.Embed:
         e = discord.Embed(
-            title=f"🔔 Ready check — Custom #{self.custom_id} · {self.name}",
+            title=t("ready.title", custom_id=self.custom_id, name=self.name),
             description=(
-                outcome or
-                f"Everyone below has to be ready before the match starts.\n"
-                f"Closes {discord.utils.format_dt(self.deadline, 'R')}."
+                outcome
+                or t("ready.desc", when=discord.utils.format_dt(self.deadline, "R"))
             ),
-            color=VAL_RED,
+            color=EMBED_COLOR,
         )
         if self.round_no > 1:
-            e.title += f" (round {self.round_no})"
+            e.title += t("ready.round", n=self.round_no)
         e.add_field(
-            name=f"Ready {len(self.ready)}/{len(self.starters)}",
+            name=t("ready.count", n=len(self.ready), total=len(self.starters)),
             value=self._roster_lines(),
             inline=False,
         )
         if outcome is None:
-            e.set_footer(text="❌ Can't play frees your seat for a sub straight away.")
+            e.set_footer(text=t("ready.footer"))
         return e
 
 
@@ -301,17 +303,24 @@ class DraftController:
             await s.commit()
 
     def embed(self) -> discord.Embed:
-        title = "🐍 Snake Draft" if self.mode == "snake" else "🔁 Draft (one by one)"
-        e = discord.Embed(title=f"{title} — Match #{self.match_id}", color=VAL_RED)
-        e.add_field(name="🟥 Team A", value="\n".join(f"<@{u}>" for u in self.team["A"]), inline=True)
-        e.add_field(name="🟦 Team B", value="\n".join(f"<@{u}>" for u in self.team["B"]), inline=True)
+        mode = t("draft.title.snake" if self.mode == "snake" else "draft.title.alternate")
+        e = discord.Embed(
+            title=t("draft.title", mode=mode, match_id=self.match_id), color=EMBED_COLOR
+        )
+        e.add_field(name=t("common.team_a"),
+                    value="\n".join(f"<@{u}>" for u in self.team["A"]), inline=True)
+        e.add_field(name=t("common.team_b"),
+                    value="\n".join(f"<@{u}>" for u in self.team["B"]), inline=True)
         if not self.done:
-            cap = self.captain_for_turn()
-            e.add_field(name="On the clock",
-                        value=f"<@{cap}> ({self.current_side()}) — {len(self.pool)} left",
-                        inline=False)
+            e.add_field(
+                name=t("draft.on_clock"),
+                value=t("draft.on_clock_value", captain_id=self.captain_for_turn(),
+                        side=self.current_side(), n=len(self.pool)),
+                inline=False,
+            )
         else:
-            e.add_field(name="Complete", value="All players drafted.", inline=False)
+            e.add_field(name=t("draft.complete"), value=t("draft.complete_value"),
+                        inline=False)
         return e
 
 
@@ -407,9 +416,14 @@ class VetoController:
         return self.picked_maps[-1]
 
     def side_text(self, map_name: str, chooser: str, choice: str) -> str:
-        flip = other_choice(choice)
-        return (f"**{map_name}** — Team {chooser} {choice}, "
-                f"Team {other_side(chooser)} {flip}")
+        return t(
+            "veto.side_text",
+            map=map_name,
+            chooser=chooser,
+            choice=t(f"veto.{choice}"),
+            other=other_side(chooser),
+            flip=t(f"veto.{other_choice(choice)}"),
+        )
 
     async def persist(self) -> None:
         async with SessionLocal() as s:
@@ -425,37 +439,42 @@ class VetoController:
         self._pending = []
 
     def result_text(self, auto: bool = False) -> str:
-        note = " (auto)" if auto else ""
+        note = t("common.auto_paren") if auto else ""
         if self.sides:
             lines = "\n".join(
                 f"{i}. {self.side_text(*s)}" for i, s in enumerate(self.sides, start=1)
             )
-            return f"✅ Map selection complete{note}.\n{lines}"
-        maps = ", ".join(self.picked_maps) if self.picked_maps else "—"
-        return f"✅ Veto complete{note}. Maps: **{maps}**"
+            return t("veto.result_maps", note=note, lines=lines)
+        maps = ", ".join(self.picked_maps) if self.picked_maps else DASH
+        return t("veto.result_simple", note=note, maps=maps)
 
     async def on_complete(self, itx: discord.Interaction) -> None:
         await self.persist()
         await itx.followup.send(self.result_text())
 
     def embed(self) -> discord.Embed:
-        e = discord.Embed(title=f"🗺 Map Veto — Match #{self.match_id}", color=VAL_RED)
-        e.add_field(name="Remaining", value=", ".join(self.remaining) or "—", inline=False)
+        e = discord.Embed(
+            title=t("veto.title", match_id=self.match_id), color=EMBED_COLOR
+        )
+        e.add_field(name=t("veto.remaining"), value=", ".join(self.remaining) or DASH,
+                    inline=False)
         if self.picked_maps:
-            e.add_field(name="Picked", value=", ".join(self.picked_maps), inline=False)
+            e.add_field(name=t("veto.picked"), value=", ".join(self.picked_maps),
+                        inline=False)
         if self.sides:
             e.add_field(
-                name="🎯 Sides",
+                name=t("veto.sides"),
                 value="\n".join(self.side_text(*s) for s in self.sides),
                 inline=False,
             )
         cur = self.current
         if cur and cur.side:
             turn = (
-                f"<@{self.captain_for_turn()}> picks a side on "
-                f"**{self.current_side_map}**"
+                t("veto.turn_side", captain_id=self.captain_for_turn(),
+                  map=self.current_side_map)
                 if cur.action == "side"
-                else f"<@{self.captain_for_turn()}> to {cur.action}"
+                else t("veto.turn_action", captain_id=self.captain_for_turn(),
+                       action=t(f"veto.action.{cur.action}"))
             )
-            e.add_field(name="Turn", value=turn, inline=False)
+            e.add_field(name=t("veto.turn"), value=turn, inline=False)
         return e

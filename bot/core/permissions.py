@@ -17,10 +17,13 @@ from bot.config import settings
 from bot.core.errors import PermissionDenied
 from bot.db import SessionLocal
 from bot.db.models import Custom, MemberRole
+from bot.i18n import t
 
 PLAYER, ADMIN, SUPER = 0, 1, 2
 ROLE_RANK = {"player": PLAYER, "admin": ADMIN, "superadmin": SUPER}
-RANK_NAME = {PLAYER: "Player", ADMIN: "Admin", SUPER: "SuperAdmin"}
+# Catalog keys, not finished text: a rank only has a name once the reader's
+# language is known.
+RANK_KEY = {PLAYER: "rank.player", ADMIN: "rank.admin", SUPER: "rank.superadmin"}
 
 
 async def get_roles(guild_id: int, user_id: int) -> set[str]:
@@ -90,7 +93,7 @@ def require(role: str) -> Callable:
     async def predicate(itx: discord.Interaction) -> bool:
         if await member_level(itx.user) >= want:
             return True
-        raise PermissionDenied(f"You need the **{role}** role for this.")
+        raise PermissionDenied(t("error.need_role_cmd", role=t(f"rank.{role}")))
 
     return app_commands.check(predicate)
 
@@ -100,7 +103,7 @@ def in_channel(*channel_ids: int) -> Callable:
 
     async def predicate(itx: discord.Interaction) -> bool:
         if channel_ids and itx.channel_id not in channel_ids:
-            raise PermissionDenied("Run this in the configured config channel.")
+            raise PermissionDenied(t("error.config_channel"))
         return True
 
     return app_commands.check(predicate)

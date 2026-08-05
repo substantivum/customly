@@ -8,12 +8,17 @@ one board at the same time.
 
 There are three boards and they are meant to live in three different channels:
 
-    #customs      /panel                 → 🎮 player board   (everyone)
-    #admin-panel  /panel tier:admin      → 🛡 admin board    (Admin+)
-    #super-panel  /panel tier:superadmin → 👑 super board    (SuperAdmin)
+    #customs      /panel                 → player board   (everyone)
+    #admin-panel  /panel tier:admin      → admin board    (Admin+)
+    #super-panel  /panel tier:superadmin → super board    (SuperAdmin)
 
 Set `ADMIN_PANEL_CHANNEL` / `SUPERADMIN_PANEL_CHANNEL` in `.env` and the staff
 boards refuse to be posted anywhere else.
+
+Every label here is built at *render* time rather than declared with a
+`@discord.ui.button` decorator: a decorator's label is evaluated at import, long
+before the server's language is known. The persistent board buttons keep their
+fixed `custom_id`s, which is what makes them survive a restart.
 
 Profiles, personal scores and leaderboards are deliberately **absent** from the
 panel: that feature isn't finished, and a board that only shows lobby-relevant
@@ -30,13 +35,13 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.core import actions, audit, board
-from bot.core.embeds import VAL_RED, custom_registration_embed, start_line
+from bot.core.embeds import EMBED_COLOR, custom_registration_embed, start_line
 from bot.core.errors import BotError
 from bot.core.nav import Screen
 from bot.core.permissions import (
     ADMIN,
     PLAYER,
-    RANK_NAME,
+    RANK_KEY,
     SUPER,
     can_manage_custom,
     is_superadmin,
@@ -45,25 +50,37 @@ from bot.core.permissions import (
 from bot.core.ui import reply
 from bot.db import SessionLocal
 from bot.db.models import AuditLog, Custom, Map, MemberRole
+from bot.i18n import LANG_NAME, LANGS, lang_context, t
+from bot.i18n.translator import L
+from bot.i18n.ui import LocalizedModal, bind
 from bot.services import bans as bans_svc
 from bot.services import custom as custom_svc
 from bot.services import draft as draft_svc
+from bot.services import guild_svc
 from bot.services import maps as maps_svc
 from bot.services import panel_svc
 
 TIER_LEVEL = {"player": PLAYER, "admin": ADMIN, "superadmin": SUPER}
-TIER_LABEL = {"player": "🎮 Customs", "admin": "🛡 Admin", "superadmin": "👑 Super Admin"}
+TIER_KEY = {"player": "tier.player", "admin": "tier.admin",
+            "superadmin": "tier.superadmin"}
 TIER_CHANNEL = {
     "admin": "admin_panel_channel",
     "superadmin": "superadmin_panel_channel",
 }
+
+# On/off dots for the map pool — the same indicator language the boards use.
+MAP_ON, MAP_OFF = "🟢", "🔴"
+
+
+def tier_label(tier: str) -> str:
+    return t(TIER_KEY[tier])
 
 
 async def _guard(itx: discord.Interaction, level: int) -> bool:
     """Shared level check; explains what the caller is missing."""
     if await member_level(itx.user) >= level:
         return True
-    await reply(itx, f"This action needs the **{RANK_NAME[level]}** role.")
+    await reply(itx, t("error.need_role", role=t(RANK_KEY[level])))
     return False
 
 
@@ -71,7 +88,7 @@ async def _get_custom(itx: discord.Interaction, custom_id: int) -> Custom | None
     async with SessionLocal() as s:
         c = await s.get(Custom, custom_id)
     if not c or c.guild_id != itx.guild_id:
-        await reply(itx, f"Custom #{custom_id} no longer exists.")
+        await reply(itx, t("error.custom_gone", custom_id=custom_id))
         return None
     return c
 
@@ -80,34 +97,42 @@ def _picker_options(customs: list[Custom]) -> list[discord.SelectOption]:
     return [
         discord.SelectOption(
             label=f"#{c.custom_id} {c.name}"[:100],
-            description=f"{c.format} · {c.team_size}v{c.team_size} · {c.state}"[:100],
+            description=t("picker.desc", fmt=c.format, size=c.team_size,
+                          state=board.state_name(c.state))[:100],
             value=str(c.custom_id),
-            emoji=board.STATE_EMOJI.get(c.state),
+            emoji=board.state_dot(c.state),
         )
         for c in customs[:25]
     ]
 
 
 # ============================================================== modals ========
-class CreateCustomModal(discord.ui.Modal, title="Create custom"):
+class CreateCustomModal(LocalizedModal):
     """Step 2 of creation — map pool and draft mode were already chosen on the
     Create screen. (Discord modals cannot contain dropdowns, hence two steps.)"""
 
-    name = discord.ui.TextInput(label="Name", placeholder="Friday 5v5", max_length=64)
-    fmt = discord.ui.TextInput(label="Format (BO1/BO3/BO5)", default="BO1", max_length=3)
-    team_size = discord.ui.TextInput(label="Team size (1-5)", default="5", max_length=1)
-    start = discord.ui.TextInput(
-        label="Start — blank = ASAP",
-        placeholder="20:00 (server time) or ISO — leave empty to play now",
-        required=False,
-    )
-
     def __init__(self, maps: list[str] | None = None, draft_mode: str = "snake",
                  captain_method: str = "random"):
-        super().__init__()
+        super().__init__(title=t("modal.create.title"))
         self.maps = maps or []
         self.draft_mode = draft_mode
         self.captain_method = captain_method
+        self.name = discord.ui.TextInput(
+            label=t("modal.create.name"), placeholder=t("modal.create.name_ph"),
+            max_length=64,
+        )
+        self.fmt = discord.ui.TextInput(
+            label=t("modal.create.fmt"), default="BO1", max_length=3
+        )
+        self.team_size = discord.ui.TextInput(
+            label=t("modal.create.team_size"), default="5", max_length=1
+        )
+        self.start = discord.ui.TextInput(
+            label=t("modal.create.start"), placeholder=t("modal.create.start_ph"),
+            required=False,
+        )
+        for item in (self.name, self.fmt, self.team_size, self.start):
+            self.add_item(item)
 
     async def on_submit(self, itx: discord.Interaction):
         # Creating a custom writes to the DB and makes two REST calls (create
@@ -125,39 +150,46 @@ class CreateCustomModal(discord.ui.Modal, title="Create custom"):
         except (BotError, ValueError) as e:
             return await reply(itx, str(e))
         reg = itx.guild.get_channel(c.reg_channel)
-        await reply(itx, f"Created **Custom #{c.custom_id}** ({c.team_size}v{c.team_size}) → "
-                         f"{reg.mention if reg else '#custom-' + str(c.custom_id)}")
+        await reply(itx, t(
+            "custom.created", custom_id=c.custom_id, size=c.team_size,
+            channel=reg.mention if reg else f"#custom-{c.custom_id}",
+        ))
 
 
-class AddMapModal(discord.ui.Modal, title="Add map"):
-    name = discord.ui.TextInput(label="Map name", placeholder="Ascent", max_length=32)
-
+class AddMapModal(LocalizedModal):
     def __init__(self, screen: "MapsScreen"):
-        super().__init__()
+        super().__init__(title=t("modal.addmap.title"))
         self.screen = screen
+        self.name = discord.ui.TextInput(
+            label=t("modal.addmap.name"), placeholder=t("modal.addmap.name_ph"),
+            max_length=32,
+        )
+        self.add_item(self.name)
 
     async def on_submit(self, itx: discord.Interaction):
         name = self.name.value.strip()
         if not name:
-            return await reply(itx, "Map name can't be empty.")
+            return await reply(itx, t("maps.err.empty"))
         async with SessionLocal() as s:
             if await s.get(Map, (itx.guild_id, name)):
-                return await reply(itx, f"**{name}** is already in the pool.")
+                return await reply(itx, t("maps.err.exists", name=name))
             s.add(Map(guild_id=itx.guild_id, name=name, enabled=True))
             await s.commit()
         await self.screen.repaint()        # redraw the pool behind the modal
         board.schedule(itx.guild)
-        await reply(itx, f"Added **{name}**.")
+        await reply(itx, t("maps.added", name=name))
 
 
-class BanReasonModal(discord.ui.Modal, title="Ban player"):
-    reason = discord.ui.TextInput(label="Reason (optional)", required=False,
-                                  style=discord.TextStyle.paragraph)
-
+class BanReasonModal(LocalizedModal):
     def __init__(self, member: discord.Member, screen: "BansScreen"):
-        super().__init__()
+        super().__init__(title=t("modal.ban.title"))
         self.member = member
         self.screen = screen
+        self.reason = discord.ui.TextInput(
+            label=t("modal.ban.reason"), required=False,
+            style=discord.TextStyle.paragraph,
+        )
+        self.add_item(self.reason)
 
     async def on_submit(self, itx: discord.Interaction):
         created = await bans_svc.ban(itx.guild_id, self.member.id, itx.user.id,
@@ -165,7 +197,8 @@ class BanReasonModal(discord.ui.Modal, title="Ban player"):
         await audit.log(itx.guild_id, itx.user.id, "ban", str(self.member.id))
         await self.screen.repaint()
         board.schedule(itx.guild)
-        await reply(itx, f"{'Banned' if created else 'Already banned'} {self.member.mention}.")
+        await reply(itx, t("bans.banned" if created else "bans.already_banned",
+                           member=self.member.mention))
 
 
 # ------------------------------------------------------------ profiles ------
@@ -183,6 +216,8 @@ class _Gated(Screen):
     LEVEL = PLAYER
 
     async def interaction_check(self, itx: discord.Interaction) -> bool:
+        # Bind the language first: the refusal below is itself translated.
+        await super().interaction_check(itx)
         return await _guard(itx, self.LEVEL)
 
 
@@ -201,18 +236,19 @@ class CustomsScreen(_Gated):
     async def embed(self) -> discord.Embed:
         self._customs = await board.active_customs(self.guild_id)
         e = discord.Embed(
-            title="🎮 Customs — pick a game",
-            description="Choose one below to see its roster and register.",
-            color=VAL_RED,
+            title=t("screen.customs.title"),
+            description=t("screen.customs.desc"),
+            color=EMBED_COLOR,
         )
         if not self._customs:
-            e.description = "No games are open right now. Check back later."
+            e.description = t("screen.customs.empty")
             return e
         lines = []
         for c in self._customs[:25]:
             mine = await actions.is_registered(c.custom_id, self.user_id)
-            lines.append(await board.custom_line(c) + ("  ✅ **you're in**" if mine else ""))
-        e.add_field(name=f"Open games ({len(self._customs)})",
+            lines.append(await board.custom_line(c)
+                         + (t("screen.customs.youre_in") if mine else ""))
+        e.add_field(name=t("board.open_games", n=len(self._customs)),
                     value="\n".join(lines)[:1024], inline=False)
         return e
 
@@ -222,7 +258,7 @@ class CustomsScreen(_Gated):
 
     class _Picker(discord.ui.Select):
         def __init__(self, customs: list[Custom]):
-            super().__init__(placeholder="Choose a game…",
+            super().__init__(placeholder=t("screen.customs.pick"),
                              options=_picker_options(customs), row=0)
 
         async def callback(self, itx: discord.Interaction):
@@ -252,31 +288,35 @@ class CustomScreen(_Gated):
             c = await s.get(Custom, self.cid)
         if not c:
             self._registered = self._open = False
-            return discord.Embed(title="Gone",
-                                 description=f"Custom #{self.cid} no longer exists.",
-                                 color=VAL_RED)
+            return discord.Embed(
+                title=t("screen.gone.title"),
+                description=t("error.custom_gone", custom_id=self.cid),
+                color=EMBED_COLOR,
+            )
         r = await custom_svc.roster(self.cid)
         self._open = c.state in ("registration", "full")
         self._registered = self.user_id in r.all
         e = custom_registration_embed(c, r.starters, r.size, r.waitlist)
         if self._registered:
-            seat = ("🪑 on the waitlist — you play if a starter drops"
-                    if self.user_id in r.waitlist else "✅ you're in the game")
-            e.add_field(name="You", value=seat, inline=False)
+            seat = t("screen.custom.you_waitlist" if self.user_id in r.waitlist
+                     else "screen.custom.you_in")
+            e.add_field(name=t("screen.custom.you"), value=seat, inline=False)
         elif not self._open:
-            e.add_field(name="You", value="Registration is closed for this game.",
-                        inline=False)
+            e.add_field(name=t("screen.custom.you"),
+                        value=t("screen.custom.closed"), inline=False)
         return e
 
     async def build(self) -> None:
-        self.add_item(self._Act("Register", "register", discord.ButtonStyle.success, "✅",
+        self.add_item(self._Act("btn.register", "register",
+                                discord.ButtonStyle.success,
                                 disabled=self._registered or not self._open))
-        self.add_item(self._Act("Leave", "leave", discord.ButtonStyle.secondary, "🚪",
+        self.add_item(self._Act("btn.leave", "leave",
+                                discord.ButtonStyle.secondary,
                                 disabled=not self._registered))
 
     class _Act(discord.ui.Button):
-        def __init__(self, label, action, style, emoji, *, disabled=False):
-            super().__init__(label=label, style=style, emoji=emoji,
+        def __init__(self, label_key, action, style, *, disabled=False):
+            super().__init__(label=t(label_key), style=style,
                              disabled=disabled, row=0)
             self.action = action
 
@@ -312,30 +352,30 @@ class CreateScreen(_Gated):
         self._maps = await maps_svc.enabled_maps(self.guild_id)
         self._competitive = await maps_svc.competitive_names(self.guild_id)
         e = discord.Embed(
-            title="➕ Create a custom",
-            description="Set the map pool and draft mode here, then **Continue** "
-                        "for name, format, team size and start time.",
-            color=VAL_RED,
+            title=t("screen.create.title"),
+            description=t("screen.create.desc"),
+            color=EMBED_COLOR,
         )
         e.add_field(
-            name="🗺 Map pool",
+            name=t("common.maps"),
             value=", ".join(self.selected) if self.selected
-            else f"_all {len(self._maps)} enabled maps_",
+            else t("screen.create.all_maps", n=len(self._maps)),
             inline=False,
         )
-        e.add_field(name="🎲 Draft",
-                    value=draft_svc.DRAFT_MODE_LABEL[self.draft_mode], inline=True)
+        e.add_field(name=t("common.draft"),
+                    value=draft_svc.draft_mode_label(self.draft_mode), inline=True)
         e.add_field(
-            name="👑 Captains",
-            value=f"{draft_svc.CAPTAIN_METHOD_LABEL[self.captain_method]}\n"
-                  f"_{draft_svc.CAPTAIN_METHOD_HELP[self.captain_method]}_",
+            name=t("common.captains"),
+            value=f"{draft_svc.captain_label(self.captain_method)}\n"
+                  f"_{draft_svc.captain_help(self.captain_method)}_",
             inline=True,
         )
-        e.add_field(name="⭐ Competitive pool",
-                    value=", ".join(self._competitive) if self._competitive else "_not set_",
+        e.add_field(name=t("board.competitive"),
+                    value=", ".join(self._competitive) if self._competitive
+                    else t("common.not_set"),
                     inline=False)
         if not self._maps:
-            e.description = "⚠️ No enabled maps — seed the pool in **Maps** first."
+            e.description = t("screen.create.no_maps")
         return e
 
     async def build(self) -> None:
@@ -354,7 +394,7 @@ class CreateScreen(_Gated):
                 for m in maps[:25]
             ]
             super().__init__(
-                placeholder="Map pool — pick 2+ maps (none = whole enabled pool)…",
+                placeholder=t("screen.create.pool_ph"),
                 options=opts, min_values=0, max_values=len(opts), row=0,
             )
 
@@ -365,16 +405,16 @@ class CreateScreen(_Gated):
     class _DraftMode(discord.ui.Select):
         def __init__(self, current: str):
             super().__init__(
-                placeholder="Draft mode — snake (default) or one by one…",
+                placeholder=t("screen.create.draft_ph"),
                 options=[
                     discord.SelectOption(
-                        label="Snake draft", value="snake", emoji="🐍",
-                        description="A, BB, AA, BB … — evens out the first-pick edge",
+                        label=t("draft.snake.label"), value="snake",
+                        description=t("draft.snake.desc")[:100],
                         default=current == "snake",
                     ),
                     discord.SelectOption(
-                        label="One by one", value="alternate", emoji="🔁",
-                        description="A, B, A, B … — strict alternating picks",
+                        label=t("draft.alternate.label"), value="alternate",
+                        description=t("draft.alternate.desc")[:100],
                         default=current == "alternate",
                     ),
                 ],
@@ -391,11 +431,11 @@ class CreateScreen(_Gated):
 
         def __init__(self, current: str):
             super().__init__(
-                placeholder="Captains — how the two captains are chosen…",
+                placeholder=t("screen.create.captains_ph"),
                 options=[
                     discord.SelectOption(
-                        label=draft_svc.CAPTAIN_METHOD_LABEL[m], value=m,
-                        description=draft_svc.CAPTAIN_METHOD_HELP[m][:100],
+                        label=draft_svc.captain_label(m), value=m,
+                        description=draft_svc.captain_help(m)[:100],
                         default=m == current,
                     )
                     for m in draft_svc.CREATE_METHODS
@@ -409,28 +449,25 @@ class CreateScreen(_Gated):
 
     class _Competitive(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Competitive pool", style=discord.ButtonStyle.primary,
-                             emoji="⭐", row=3)
+            super().__init__(label=t("btn.competitive_pool"),
+                             style=discord.ButtonStyle.primary, row=3)
 
         async def callback(self, itx: discord.Interaction):
             view: CreateScreen = self.view
             if not view._competitive:
-                return await reply(
-                    itx, "No competitive pool set yet — set it in **Maps → "
-                         "⭐ Competitive pool**."
-                )
+                return await reply(itx, t("screen.create.no_comp"))
             view.selected = list(view._competitive)
             await view.reload(itx)
 
     class _Continue(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Continue", style=discord.ButtonStyle.success,
-                             emoji="➡️", row=3)
+            super().__init__(label=t("btn.continue"),
+                             style=discord.ButtonStyle.success, row=3)
 
         async def callback(self, itx: discord.Interaction):
             view: CreateScreen = self.view
             if view.selected and len(view.selected) < 2:
-                return await reply(itx, "Pick at least 2 maps, or none for the whole pool.")
+                return await reply(itx, t("screen.create.min_maps"))
             await itx.response.send_modal(
                 CreateCustomModal(view.selected, view.draft_mode, view.captain_method)
             )
@@ -453,19 +490,18 @@ class ManageListScreen(_Gated):
     async def embed(self) -> discord.Embed:
         self._customs = await board.active_customs(self.guild_id, owned_by=self.owner_id)
         e = discord.Embed(
-            title="🔧 Manage customs",
-            description=("Every active custom in the server."
-                         if self.owner_id is None else "The customs you own."),
-            color=VAL_RED,
+            title=t("screen.manage_list.title"),
+            description=t("screen.manage_list.desc_all" if self.owner_id is None
+                          else "screen.manage_list.desc_own"),
+            color=EMBED_COLOR,
         )
         e.add_field(
-            name=f"Active ({len(self._customs)})",
+            name=t("screen.manage_list.active", n=len(self._customs)),
             value=await board.customs_field(self._customs, with_owner=True),
             inline=False,
         )
         if not self._customs and self.owner_id is not None:
-            e.description = ("You don't own an active custom. Create one, or ask a "
-                             "superadmin to transfer one to you.")
+            e.description = t("screen.manage_list.empty_own")
         return e
 
     async def build(self) -> None:
@@ -474,7 +510,7 @@ class ManageListScreen(_Gated):
 
     class _Picker(discord.ui.Select):
         def __init__(self, customs: list[Custom]):
-            super().__init__(placeholder="Pick a custom to manage…",
+            super().__init__(placeholder=t("screen.manage_list.pick"),
                              options=_picker_options(customs), row=0)
 
         async def callback(self, itx: discord.Interaction):
@@ -503,39 +539,40 @@ class ManageScreen(_Gated):
             c = await s.get(Custom, self.cid)
         if not c:
             self._alive = False
-            return discord.Embed(title="Gone",
-                                 description=f"Custom #{self.cid} no longer exists.",
-                                 color=VAL_RED)
+            return discord.Embed(
+                title=t("screen.gone.title"),
+                description=t("error.custom_gone", custom_id=self.cid),
+                color=EMBED_COLOR,
+            )
         self._alive, self._state = True, c.state
         r = await custom_svc.roster(self.cid)
         self._roster_full = bool(r.size) and len(r.starters) >= r.size
         method = c.captain_method or "random"
         e = discord.Embed(
-            title=f"🔧 Custom #{c.custom_id} — {c.name}",
-            description=(
-                f"{board.STATE_EMOJI.get(c.state, '•')} **{c.state}**  ·  "
-                f"{c.format}  ·  **{c.team_size}v{c.team_size}**\n"
-                f"**Starts:** {start_line(c)}\n"
-                f"**Map pool:** {', '.join(json.loads(c.map_pool))}\n"
-                f"**Draft:** {draft_svc.DRAFT_MODE_LABEL.get(c.draft_mode, c.draft_mode)}\n"
-                f"**Captains:** {draft_svc.CAPTAIN_METHOD_LABEL.get(method, method)} "
-                f"_(set at creation)_"
+            title=t("screen.manage.title", custom_id=c.custom_id, name=c.name),
+            description=t(
+                "screen.manage.body",
+                dot=board.state_dot(c.state), state=board.state_name(c.state),
+                fmt=c.format, size=c.team_size, start=start_line(c),
+                pool=", ".join(json.loads(c.map_pool)),
+                draft=draft_svc.draft_mode_label(c.draft_mode),
+                captains=draft_svc.captain_label(method),
             ),
-            color=VAL_RED,
+            color=EMBED_COLOR,
         )
-        e.add_field(name="Owner", value=f"<@{c.owner_id}>", inline=True)
-        e.add_field(name="Seats", value=f"{len(r.starters)}/{r.size}", inline=True)
-        e.add_field(name="🪑 Waitlist", value=str(len(r.waitlist)), inline=True)
+        e.add_field(name=t("common.owner"), value=f"<@{c.owner_id}>", inline=True)
+        e.add_field(name=t("common.seats"), value=f"{len(r.starters)}/{r.size}",
+                    inline=True)
+        e.add_field(name=t("common.waitlist"), value=str(len(r.waitlist)), inline=True)
         e.add_field(
-            name="Players",
-            value="\n".join(f"• <@{u}>" for u in r.starters) or "_nobody yet_",
+            name=t("common.players"),
+            value="\n".join(f"• <@{u}>" for u in r.starters) or t("common.nobody_yet"),
             inline=False,
         )
         if self._state == "ready":
             e.add_field(
-                name="🔔 Ready check running",
-                value="Players are confirming in the custom's channel. **Start** "
-                      "or **Force start** cuts it short and begins anyway.",
+                name=t("screen.manage.ready_title"),
+                value=t("screen.manage.ready_body"),
                 inline=False,
             )
         return e
@@ -551,17 +588,18 @@ class ManageScreen(_Gated):
                      and self.cid not in actions.ACTIVE_READY)
         self.add_item(self._Transfer())
         self.add_item(self._ReadyCheck(disabled=not can_check))
-        self.add_item(self._Start("Start", False, discord.ButtonStyle.success, "▶️",
+        self.add_item(self._Start("btn.start", False, discord.ButtonStyle.success,
                                   disabled=not startable))
-        self.add_item(self._Start("Force start", True, discord.ButtonStyle.success, "⏩",
+        self.add_item(self._Start("btn.force_start", True, discord.ButtonStyle.success,
                                   disabled=not startable))
         self.add_item(self._End(disabled=not endable))
         self.add_item(self._Delete())
 
     class _ReadyCheck(discord.ui.Button):
         def __init__(self, *, disabled):
-            super().__init__(label="Ready check", style=discord.ButtonStyle.primary,
-                             emoji="🔔", disabled=disabled, row=1)
+            super().__init__(label=t("btn.ready_check"),
+                             style=discord.ButtonStyle.primary,
+                             disabled=disabled, row=1)
 
         async def callback(self, itx: discord.Interaction):
             view: ManageScreen = self.view
@@ -578,7 +616,8 @@ class ManageScreen(_Gated):
 
     class _Transfer(discord.ui.UserSelect):
         def __init__(self):
-            super().__init__(placeholder="Transfer ownership to…", max_values=1, row=0)
+            super().__init__(placeholder=t("screen.manage.transfer_ph"),
+                             max_values=1, row=0)
 
         async def callback(self, itx: discord.Interaction):
             view: ManageScreen = self.view
@@ -591,12 +630,12 @@ class ManageScreen(_Gated):
                 return await reply(itx, str(e))
             await view.reload(itx)
             board.schedule(itx.guild)
-            await reply(itx, f"Ownership of #{view.cid} → {new.mention} "
-                             f"(they've been notified).")
+            await reply(itx, t("custom.transferred_short", custom_id=view.cid,
+                               member=new.mention))
 
     class _Start(discord.ui.Button):
-        def __init__(self, label, partial, style, emoji, *, disabled):
-            super().__init__(label=label, style=style, emoji=emoji,
+        def __init__(self, label_key, partial, style, *, disabled):
+            super().__init__(label=t(label_key), style=style,
                              disabled=disabled, row=2)
             self.partial = partial
 
@@ -612,7 +651,7 @@ class ManageScreen(_Gated):
 
     class _End(discord.ui.Button):
         def __init__(self, *, disabled):
-            super().__init__(label="End", style=discord.ButtonStyle.primary, emoji="🏁",
+            super().__init__(label=t("btn.end"), style=discord.ButtonStyle.primary,
                              disabled=disabled, row=2)
 
         async def callback(self, itx: discord.Interaction):
@@ -624,7 +663,7 @@ class ManageScreen(_Gated):
             except BotError as e:
                 return await reply(itx, str(e))
             board.schedule(itx.guild)
-            await reply(itx, f"Ended Custom #{view.cid}.")
+            await reply(itx, t("custom.ended", custom_id=view.cid))
             # The custom is gone from the active list — go back to it rather than
             # leaving a manage screen for something that no longer runs.
             if view.parent is not None:
@@ -634,7 +673,7 @@ class ManageScreen(_Gated):
 
     class _Delete(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑",
+            super().__init__(label=t("btn.delete"), style=discord.ButtonStyle.danger,
                              row=2)
 
         async def callback(self, itx: discord.Interaction):
@@ -643,12 +682,11 @@ class ManageScreen(_Gated):
             if not c:
                 return
             if not await can_manage_custom(c, itx.user):
-                return await reply(itx, "You can't manage this custom.")
+                return await reply(itx, t("error.cant_manage"))
             await view.goto(itx, ConfirmScreen(
                 parent=view,
-                title=f"🗑 Delete Custom #{view.cid}?",
-                description=f"**{c.name}** — its channel, voice channels and queue "
-                            f"all go away. This can't be undone.",
+                title=t("confirm.delete.title", custom_id=view.cid),
+                description=t("confirm.delete.desc", name=c.name),
                 confirm=_delete_custom_action(view.cid),
                 allow_force=view.is_super,
                 after=view.parent,
@@ -657,20 +695,20 @@ class ManageScreen(_Gated):
 
 def _delete_custom_action(custom_id: int):
     async def run(itx: discord.Interaction, force: bool) -> str:
-        await actions.cancel_ready_check(custom_id, "🗑 Custom deleted.")
+        await actions.cancel_ready_check(custom_id, t("ready.cancel.deleted"))
         await custom_svc.delete_custom(custom_id, itx.guild, force=force)
         await audit.log(itx.guild_id, itx.user.id, "custom_delete", str(custom_id),
                         force=force)
         board.schedule(itx.guild)
-        return f"Deleted Custom #{custom_id}."
+        return t("custom.deleted", custom_id=custom_id)
 
     return run
 
 
 # ------------------------------------------------------------ admin: maps ---
 class MapsScreen(_Gated):
-    """The pool, its on/off state and the ⭐ competitive rotation, all visible
-    at once — tick as many as you like in one go."""
+    """The pool, its on/off state and the competitive rotation, all visible at
+    once — tick as many as you like in one go."""
 
     LEVEL = ADMIN
 
@@ -681,18 +719,20 @@ class MapsScreen(_Gated):
 
     async def embed(self) -> discord.Embed:
         self._maps = await maps_svc.all_maps(self.guild_id)
-        e = discord.Embed(title="🗺 Map pool", color=VAL_RED)
+        e = discord.Embed(title=t("board.map_pool"), color=EMBED_COLOR)
         if not self._maps:
-            e.description = "No maps configured — hit **Seed defaults**."
+            e.description = t("screen.maps.empty")
             return e
         comp = [m.name for m in self._maps if m.competitive]
         e.description = "\n".join(
-            f"{'🟢' if m.enabled else '🔴'} {m.name}{' ⭐' if m.competitive else ''}"
+            t("maps.list_line_comp" if m.competitive else "maps.list_line",
+              dot=MAP_ON if m.enabled else MAP_OFF, name=m.name)
             for m in self._maps
         )[:4096]
-        e.add_field(name="⭐ Competitive pool",
-                    value=", ".join(comp) if comp else "_not set_", inline=False)
-        e.set_footer(text="Ticking a map competitive enables it for play.")
+        e.add_field(name=t("board.competitive"),
+                    value=", ".join(comp) if comp else t("common.not_set"),
+                    inline=False)
+        e.set_footer(text=t("screen.maps.footer"))
         return e
 
     async def build(self) -> None:
@@ -707,12 +747,12 @@ class MapsScreen(_Gated):
             opts = [
                 discord.SelectOption(
                     label=m.name, value=m.name,
-                    description="enabled" if m.enabled else "disabled",
-                    emoji="🟢" if m.enabled else "🔴",
+                    description=t("common.enabled" if m.enabled else "common.disabled"),
+                    emoji=MAP_ON if m.enabled else MAP_OFF,
                 )
                 for m in maps[:25]
             ]
-            super().__init__(placeholder="Toggle maps on/off (pick as many as you like)…",
+            super().__init__(placeholder=t("screen.maps.toggle_ph"),
                              options=opts, min_values=1, max_values=len(opts), row=0)
 
         async def callback(self, itx: discord.Interaction):
@@ -723,11 +763,15 @@ class MapsScreen(_Gated):
                     if not m:  # removed by someone else meanwhile
                         continue
                     m.enabled = not m.enabled
-                    flipped.append(f"**{name}** → {'enabled' if m.enabled else 'disabled'}")
+                    flipped.append(t(
+                        "screen.maps.flipped", name=name,
+                        state=t("common.enabled" if m.enabled else "common.disabled"),
+                    ))
                 await s.commit()
             await self.view.reload(itx)
             board.schedule(itx.guild)
-            await reply(itx, "\n".join(flipped) if flipped else "Nothing to toggle.")
+            await reply(itx, "\n".join(flipped) if flipped
+                        else t("screen.maps.nothing"))
 
     class _Competitive(discord.ui.Select):
         """Sets the competitive pool to exactly what's ticked (empty clears it)."""
@@ -735,13 +779,13 @@ class MapsScreen(_Gated):
         def __init__(self, maps: list[Map]):
             opts = [
                 discord.SelectOption(
-                    label=m.name, value=m.name, emoji="⭐" if m.competitive else None,
-                    description="in the competitive pool" if m.competitive else None,
+                    label=m.name, value=m.name,
+                    description=t("screen.maps.in_comp") if m.competitive else None,
                     default=m.competitive,
                 )
                 for m in maps[:25]
             ]
-            super().__init__(placeholder="⭐ Competitive pool — tick the current rotation…",
+            super().__init__(placeholder=t("screen.maps.comp_ph"),
                              options=opts, min_values=0, max_values=len(opts), row=1)
 
         async def callback(self, itx: discord.Interaction):
@@ -752,25 +796,26 @@ class MapsScreen(_Gated):
             board.schedule(itx.guild)
             await reply(
                 itx,
-                f"⭐ Competitive pool: **{', '.join(in_pool)}** (enabled for play)."
-                if in_pool else "Competitive pool cleared.",
+                t("maps.comp_set", maps=", ".join(in_pool)) if in_pool
+                else t("maps.comp_cleared"),
             )
 
     class _Seed(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Seed defaults", style=discord.ButtonStyle.primary,
-                             emoji="🌱", row=2)
+            super().__init__(label=t("btn.seed"), style=discord.ButtonStyle.primary,
+                             row=2)
 
         async def callback(self, itx: discord.Interaction):
             added = await maps_svc.seed(itx.guild_id)
             await self.view.reload(itx)
             board.schedule(itx.guild)
-            await reply(itx, f"Seeded {len(added)} map(s)." if added else "Pool already seeded.")
+            await reply(itx, t("maps.seeded", n=len(added)) if added
+                        else t("maps.already_seeded"))
 
     class _Add(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Add map", style=discord.ButtonStyle.success,
-                             emoji="➕", row=2)
+            super().__init__(label=t("btn.add_map"), style=discord.ButtonStyle.success,
+                             row=2)
 
         async def callback(self, itx: discord.Interaction):
             await itx.response.send_modal(AddMapModal(self.view))
@@ -788,18 +833,19 @@ class BansScreen(_Gated):
     async def embed(self) -> discord.Embed:
         rows = await bans_svc.list_bans(self.guild_id)
         e = discord.Embed(
-            title="🔨 Bans",
-            description="Banned players can't register for any game in this server.",
-            color=VAL_RED,
+            title=t("screen.bans.title"),
+            description=t("screen.bans.desc"),
+            color=EMBED_COLOR,
         )
         e.add_field(
-            name=f"Banned ({len(rows)})",
+            name=t("screen.bans.count", n=len(rows)),
             value="\n".join(f"• <@{b.user_id}>" + (f" — {b.reason}" if b.reason else "")
-                            for b in rows[:20]) or "_nobody_",
+                            for b in rows[:20]) or t("common.nobody"),
             inline=False,
         )
-        e.add_field(name="Selected",
-                    value=self.target.mention if self.target else "_pick a player below_",
+        e.add_field(name=t("common.selected"),
+                    value=self.target.mention if self.target
+                    else t("screen.bans.pick_hint"),
                     inline=False)
         return e
 
@@ -810,7 +856,7 @@ class BansScreen(_Gated):
 
     class _Member(discord.ui.UserSelect):
         def __init__(self):
-            super().__init__(placeholder="Player…", max_values=1, row=0)
+            super().__init__(placeholder=t("screen.bans.player_ph"), max_values=1, row=0)
 
         async def callback(self, itx: discord.Interaction):
             self.view.target = self.values[0]
@@ -818,7 +864,7 @@ class BansScreen(_Gated):
 
     class _Ban(discord.ui.Button):
         def __init__(self, *, disabled):
-            super().__init__(label="Ban", style=discord.ButtonStyle.danger, emoji="🔨",
+            super().__init__(label=t("btn.ban"), style=discord.ButtonStyle.danger,
                              disabled=disabled, row=1)
 
         async def callback(self, itx: discord.Interaction):
@@ -827,7 +873,7 @@ class BansScreen(_Gated):
 
     class _Unban(discord.ui.Button):
         def __init__(self, *, disabled):
-            super().__init__(label="Unban", style=discord.ButtonStyle.success, emoji="♻️",
+            super().__init__(label=t("btn.unban"), style=discord.ButtonStyle.success,
                              disabled=disabled, row=1)
 
         async def callback(self, itx: discord.Interaction):
@@ -835,8 +881,8 @@ class BansScreen(_Gated):
             removed = await bans_svc.unban(itx.guild_id, view.target.id)
             await audit.log(itx.guild_id, itx.user.id, "unban", str(view.target.id))
             await view.reload(itx)
-            await reply(itx, f"{'Unbanned' if removed else 'Was not banned'} "
-                             f"{view.target.mention}.")
+            await reply(itx, t("bans.unbanned" if removed else "bans.not_banned",
+                               member=view.target.mention))
 
 
 # ----------------------------------------------------------- shared: audit --
@@ -855,14 +901,15 @@ class AuditScreen(_Gated):
             )
             entries = [r[0] for r in rows.all()]
         e = discord.Embed(
-            title="📜 Audit log",
+            title=t("screen.audit.title"),
             description="\n".join(
-                f"`{en.ts:%m-%d %H:%M}` <@{en.actor_id}> **{en.action}** {en.target or ''}"
+                t("audit.line", ts=f"{en.ts:%m-%d %H:%M}", actor_id=en.actor_id,
+                  action=en.action, target=en.target or "")
                 for en in entries
-            ) or "_No audit entries yet._",
-            color=VAL_RED,
+            ) or t("screen.audit.empty"),
+            color=EMBED_COLOR,
         )
-        e.set_footer(text="15 most recent entries")
+        e.set_footer(text=t("screen.audit.footer"))
         return e
 
 
@@ -886,22 +933,23 @@ class RolesScreen(_Gated):
             for uid, role in rows.all():
                 by_role.setdefault(role, []).append(uid)
         e = discord.Embed(
-            title="🛡 Bot roles",
-            description="Roles granted here are on top of the `ADMIN_ROLE` / "
-                        "`SUPERADMIN_ROLE` Discord roles from `.env`.",
-            color=VAL_RED,
+            title=t("screen.roles.title"),
+            description=t("screen.roles.desc"),
+            color=EMBED_COLOR,
         )
         for role in ("superadmin", "admin"):
             ids = by_role.get(role, [])
             e.add_field(
-                name=f"{role} ({len(ids)})",
-                value=", ".join(f"<@{u}>" for u in ids[:15]) or "_none granted_",
+                name=t("screen.roles.count", role=t(f"role.{role}"), n=len(ids)),
+                value=", ".join(f"<@{u}>" for u in ids[:15]) or t("screen.roles.none"),
                 inline=False,
             )
         e.add_field(
-            name="Selected",
-            value=f"{self.target.mention if self.target else '_pick a member_'} → "
-                  f"**{self.role}**",
+            name=t("common.selected"),
+            value=t("screen.roles.selected",
+                    member=self.target.mention if self.target
+                    else t("screen.roles.pick_hint"),
+                    role=t(f"role.{self.role}")),
             inline=False,
         )
         return e
@@ -909,14 +957,14 @@ class RolesScreen(_Gated):
     async def build(self) -> None:
         self.add_item(self._Member())
         self.add_item(self._Role(self.role))
-        self.add_item(self._Apply("Grant", True, discord.ButtonStyle.success,
+        self.add_item(self._Apply("btn.grant", True, discord.ButtonStyle.success,
                                   disabled=self.target is None))
-        self.add_item(self._Apply("Revoke", False, discord.ButtonStyle.danger,
+        self.add_item(self._Apply("btn.revoke", False, discord.ButtonStyle.danger,
                                   disabled=self.target is None))
 
     class _Member(discord.ui.UserSelect):
         def __init__(self):
-            super().__init__(placeholder="Member…", max_values=1, row=0)
+            super().__init__(placeholder=t("screen.roles.member_ph"), max_values=1, row=0)
 
         async def callback(self, itx: discord.Interaction):
             self.view.target = self.values[0]
@@ -925,8 +973,9 @@ class RolesScreen(_Gated):
     class _Role(discord.ui.Select):
         def __init__(self, current: str):
             super().__init__(
-                placeholder="Role…", row=1,
-                options=[discord.SelectOption(label=r, value=r, default=r == current)
+                placeholder=t("screen.roles.role_ph"), row=1,
+                options=[discord.SelectOption(label=t(f"role.{r}"), value=r,
+                                              default=r == current)
                          for r in ("player", "admin", "superadmin")],
             )
 
@@ -935,14 +984,14 @@ class RolesScreen(_Gated):
             await self.view.reload(itx)
 
     class _Apply(discord.ui.Button):
-        def __init__(self, label, grant, style, *, disabled):
-            super().__init__(label=label, style=style, disabled=disabled, row=2)
+        def __init__(self, label_key, grant, style, *, disabled):
+            super().__init__(label=t(label_key), style=style, disabled=disabled, row=2)
             self.grant = grant
 
         async def callback(self, itx: discord.Interaction):
             view: RolesScreen = self.view
             if not await is_superadmin(itx.user):
-                return await reply(itx, "Superadmin only.")
+                return await reply(itx, t("error.superadmin_only"))
             key = (itx.guild_id, view.target.id, view.role)
             async with SessionLocal() as s:
                 row = await s.get(MemberRole, key)
@@ -956,8 +1005,67 @@ class RolesScreen(_Gated):
                             role=view.role)
             await view.reload(itx)
             board.schedule(itx.guild)
-            await reply(itx, f"{'Granted' if self.grant else 'Revoked'} **{view.role}** "
-                             f"{'to' if self.grant else 'from'} {view.target.mention}.")
+            await reply(itx, t("roles.granted" if self.grant else "roles.revoked",
+                               role=t(f"role.{view.role}"),
+                               member=view.target.mention))
+
+
+# -------------------------------------------------------- super: language ---
+class LanguageScreen(_Gated):
+    """The server's language. Superadmin only, and it changes what *everyone*
+    sees — the boards are redrawn on the way out."""
+
+    LEVEL = SUPER
+
+    def __init__(self, guild_id: int, parent: Screen | None = None):
+        super().__init__(parent)
+        self.guild_id = guild_id
+
+    async def embed(self) -> discord.Embed:
+        current = await guild_svc.get_lang(self.guild_id)
+        e = discord.Embed(
+            title=t("screen.language.title"),
+            description=t("screen.language.desc"),
+            color=EMBED_COLOR,
+        )
+        e.add_field(name=t("screen.language.current"),
+                    value=LANG_NAME.get(current, current), inline=False)
+        return e
+
+    async def build(self) -> None:
+        current = await guild_svc.get_lang(self.guild_id)
+        self.add_item(self._Pick(current))
+
+    class _Pick(discord.ui.Select):
+        def __init__(self, current: str):
+            super().__init__(
+                placeholder=t("screen.language.pick"), row=0,
+                options=[
+                    discord.SelectOption(label=LANG_NAME.get(code, code), value=code,
+                                         description=t(f"lang.name.{code}")[:100],
+                                         default=code == current)
+                    for code in LANGS
+                ],
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            view: LanguageScreen = self.view
+            chosen = self.values[0]
+            changed = await set_guild_language(itx, chosen)
+            # Re-bind so this very redraw already speaks the new language.
+            await bind(itx)
+            await view.reload(itx)
+            await reply(itx, changed)
+
+
+async def set_guild_language(itx: discord.Interaction, lang: str) -> str:
+    """Persist the language, refresh the boards, and report in the *new* one."""
+    before = await guild_svc.get_lang(itx.guild_id)
+    await guild_svc.set_lang(itx.guild_id, lang)
+    board.schedule(itx.guild)
+    with lang_context(lang):
+        key = "lang.unchanged" if before == lang else "lang.changed"
+        return t(key, language=LANG_NAME.get(lang, lang))
 
 
 # ------------------------------------------------------------ confirmation --
@@ -983,20 +1091,19 @@ class ConfirmScreen(_Gated):
         body = self.description
         if callable(body):
             body = await body()
-        e = discord.Embed(title=self.heading, description=body, color=VAL_RED)
+        e = discord.Embed(title=self.heading, description=body, color=EMBED_COLOR)
         if self.allow_force:
-            e.set_footer(text="Force also overrides the in-progress guard "
-                              "(disconnects anyone in the team voice channels).")
+            e.set_footer(text=t("confirm.force_footer"))
         return e
 
     async def build(self) -> None:
-        self.add_item(self._Go("Confirm", False))
+        self.add_item(self._Go("btn.confirm", False))
         if self.allow_force:
-            self.add_item(self._Go("Force", True))
+            self.add_item(self._Go("btn.force", True))
 
     class _Go(discord.ui.Button):
-        def __init__(self, label: str, force: bool):
-            super().__init__(label=label, style=discord.ButtonStyle.danger, row=0)
+        def __init__(self, label_key: str, force: bool):
+            super().__init__(label=t(label_key), style=discord.ButtonStyle.danger, row=0)
             self.force = force
 
         async def callback(self, itx: discord.Interaction):
@@ -1020,125 +1127,154 @@ def _prune_action():
         deleted, skipped = await custom_svc.prune(itx.guild, force=force)
         await audit.log(itx.guild_id, itx.user.id, "custom_prune", meta=str(deleted))
         board.schedule(itx.guild)
-        msg = f"Pruned {deleted} custom(s)."
+        msg = t("custom.pruned", n=deleted)
         if skipped:
-            msg += f" Skipped (in progress): {', '.join(map(str, skipped))}."
+            msg += t("custom.pruned_skipped", ids=", ".join(map(str, skipped)))
         return msg
 
     return run
 
 
 # ============================================================== boards =======
+class _BoardOpen(discord.ui.Button):
+    """A board button. `opener` is `async (itx) -> None`; the `custom_id` is
+    fixed so the button keeps working across restarts, while the label is
+    resolved fresh every time the board is drawn."""
+
+    def __init__(self, label_key: str, custom_id: str, style, row: int, opener):
+        super().__init__(label=t(label_key), style=style, row=row, custom_id=custom_id)
+        self.opener = opener
+
+    async def callback(self, itx: discord.Interaction):
+        await self.opener(itx, self.view)
+
+
 class _BoardView(discord.ui.View):
     """A persistent public board. Buttons only ever *open* a private screen, so
-    the board message is never replaced and one board serves the whole channel."""
+    the board message is never replaced and one board serves the whole channel.
+
+    Items are added in `__init__` (never by decorator) because their labels come
+    out of the catalog, and `board.refresh` rebuilds the view on every redraw so
+    a language change reaches the buttons too.
+    """
 
     TIER = "player"
+    BUTTONS: tuple = ()
 
     def __init__(self):
         super().__init__(timeout=None)
+        for label_key, custom_id, style, row, opener in self.BUTTONS:
+            self.add_item(_BoardOpen(label_key, custom_id, style, row, opener))
 
     async def interaction_check(self, itx: discord.Interaction) -> bool:
+        await bind(itx)
         return await _guard(itx, TIER_LEVEL[self.TIER])
 
     async def refresh_here(self, itx: discord.Interaction) -> None:
         """Redraw this board using the click's own interaction — instant, and
         it costs no extra API call."""
-        await itx.response.edit_message(embed=await board.embed_for(itx.guild, self.TIER))
+        await itx.response.edit_message(
+            embed=await board.embed_for(itx.guild, self.TIER),
+            view=type(self)(),
+        )
+
+
+async def _open_customs(itx, view):
+    await CustomsScreen(itx.guild_id, itx.user.id).open(itx)
+
+
+async def _open_create(itx, view):
+    await CreateScreen(itx.guild_id).open(itx)
+
+
+async def _open_manage_own(itx, view):
+    is_super = await member_level(itx.user) >= SUPER
+    await ManageListScreen(
+        itx.guild_id, None if is_super else itx.user.id, is_super
+    ).open(itx)
+
+
+async def _open_manage_any(itx, view):
+    await ManageListScreen(itx.guild_id, None, True).open(itx)
+
+
+async def _open_maps(itx, view):
+    await MapsScreen(itx.guild_id).open(itx)
+
+
+async def _open_bans(itx, view):
+    await BansScreen(itx.guild_id).open(itx)
+
+
+async def _open_audit(itx, view):
+    await AuditScreen(itx.guild_id).open(itx)
+
+
+async def _open_roles(itx, view):
+    await RolesScreen(itx.guild_id).open(itx)
+
+
+async def _open_language(itx, view):
+    await LanguageScreen(itx.guild_id).open(itx)
+
+
+async def _open_prune(itx, view):
+    guild_id = itx.guild_id
+
+    async def blast_radius() -> str:
+        customs = await board.active_customs(guild_id)
+        return t("confirm.prune.desc", n=len(customs))
+
+    await ConfirmScreen(
+        parent=None,
+        title=t("confirm.prune.title"),
+        description=blast_radius,
+        confirm=_prune_action(),
+        level=SUPER,
+        allow_force=True,
+    ).open(itx)
+
+
+async def _do_refresh(itx, view):
+    await view.refresh_here(itx)
+
+
+SUCCESS = discord.ButtonStyle.success
+PRIMARY = discord.ButtonStyle.primary
+SECONDARY = discord.ButtonStyle.secondary
+DANGER = discord.ButtonStyle.danger
 
 
 class PlayerBoard(_BoardView):
     TIER = "player"
-
-    @discord.ui.button(label="Browse & join", style=discord.ButtonStyle.success,
-                       emoji="🎮", row=0, custom_id="panel:player:customs")
-    async def customs(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await CustomsScreen(itx.guild_id, itx.user.id).open(itx)
-
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.secondary,
-                       emoji="🔄", row=0, custom_id="panel:player:refresh")
-    async def refresh(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await self.refresh_here(itx)
+    BUTTONS = (
+        ("btn.browse", "panel:player:customs", SUCCESS, 0, _open_customs),
+        ("btn.refresh", "panel:player:refresh", SECONDARY, 0, _do_refresh),
+    )
 
 
 class AdminBoard(_BoardView):
     TIER = "admin"
-
-    @discord.ui.button(label="Create custom", style=discord.ButtonStyle.success,
-                       emoji="➕", row=0, custom_id="panel:admin:create")
-    async def create(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await CreateScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Manage customs", style=discord.ButtonStyle.primary,
-                       emoji="🔧", row=0, custom_id="panel:admin:manage")
-    async def manage(self, itx: discord.Interaction, _b: discord.ui.Button):
-        is_super = await member_level(itx.user) >= SUPER
-        await ManageListScreen(
-            itx.guild_id, None if is_super else itx.user.id, is_super
-        ).open(itx)
-
-    @discord.ui.button(label="Maps", style=discord.ButtonStyle.secondary,
-                       emoji="🗺", row=0, custom_id="panel:admin:maps")
-    async def maps(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await MapsScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Bans", style=discord.ButtonStyle.danger,
-                       emoji="🔨", row=1, custom_id="panel:admin:bans")
-    async def bans(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await BansScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Audit", style=discord.ButtonStyle.secondary,
-                       emoji="📜", row=1, custom_id="panel:admin:audit")
-    async def auditlog(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await AuditScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.secondary,
-                       emoji="🔄", row=1, custom_id="panel:admin:refresh")
-    async def refresh(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await self.refresh_here(itx)
+    BUTTONS = (
+        ("btn.create_custom", "panel:admin:create", SUCCESS, 0, _open_create),
+        ("btn.manage_customs", "panel:admin:manage", PRIMARY, 0, _open_manage_own),
+        ("btn.maps", "panel:admin:maps", SECONDARY, 0, _open_maps),
+        ("btn.bans", "panel:admin:bans", DANGER, 1, _open_bans),
+        ("btn.audit", "panel:admin:audit", SECONDARY, 1, _open_audit),
+        ("btn.refresh", "panel:admin:refresh", SECONDARY, 1, _do_refresh),
+    )
 
 
 class SuperBoard(_BoardView):
     TIER = "superadmin"
-
-    @discord.ui.button(label="Bot roles", style=discord.ButtonStyle.primary,
-                       emoji="🛡", row=0, custom_id="panel:super:roles")
-    async def roles(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await RolesScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Manage any custom", style=discord.ButtonStyle.primary,
-                       emoji="🔧", row=0, custom_id="panel:super:manage")
-    async def manage(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await ManageListScreen(itx.guild_id, None, True).open(itx)
-
-    @discord.ui.button(label="Audit", style=discord.ButtonStyle.secondary,
-                       emoji="📜", row=0, custom_id="panel:super:audit")
-    async def auditlog(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await AuditScreen(itx.guild_id).open(itx)
-
-    @discord.ui.button(label="Prune all customs", style=discord.ButtonStyle.danger,
-                       emoji="🧹", row=1, custom_id="panel:super:prune")
-    async def prune(self, itx: discord.Interaction, _b: discord.ui.Button):
-        guild_id = itx.guild_id
-
-        async def blast_radius() -> str:
-            customs = await board.active_customs(guild_id)
-            return (f"**{len(customs)} active** custom(s) plus any finished ones, "
-                    f"with their channels and queues. This can't be undone.")
-
-        await ConfirmScreen(
-            parent=None,
-            title="🧹 Delete every custom in this server?",
-            description=blast_radius,
-            confirm=_prune_action(),
-            level=SUPER,
-            allow_force=True,
-        ).open(itx)
-
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.secondary,
-                       emoji="🔄", row=1, custom_id="panel:super:refresh")
-    async def refresh(self, itx: discord.Interaction, _b: discord.ui.Button):
-        await self.refresh_here(itx)
+    BUTTONS = (
+        ("btn.bot_roles", "panel:super:roles", PRIMARY, 0, _open_roles),
+        ("btn.manage_any", "panel:super:manage", PRIMARY, 0, _open_manage_any),
+        ("btn.audit", "panel:super:audit", SECONDARY, 0, _open_audit),
+        ("btn.language", "panel:super:language", SECONDARY, 0, _open_language),
+        ("btn.prune", "panel:super:prune", DANGER, 1, _open_prune),
+        ("btn.refresh", "panel:super:refresh", SECONDARY, 1, _do_refresh),
+    )
 
 
 BOARD_VIEW = {"player": PlayerBoard, "admin": AdminBoard, "superadmin": SuperBoard}
@@ -1164,13 +1300,13 @@ def _channel_error(itx: discord.Interaction, tier: str) -> str | None:
     put a lower tier into a staff channel."""
     pinned = _channel_rule(tier)
     if pinned and itx.channel_id != pinned:
-        return (f"The **{TIER_LABEL[tier]}** board is pinned to <#{pinned}> "
-                f"(`{TIER_CHANNEL[tier].upper()}`). Run it there.")
+        return t("panel.err.pinned", tier=tier_label(tier), channel_id=pinned,
+                 env=TIER_CHANNEL[tier].upper())
     for other, key in TIER_CHANNEL.items():
         other_id = getattr(settings, key)
         if other != tier and other_id and itx.channel_id == other_id:
-            return (f"This channel is reserved for the **{TIER_LABEL[other]}** board — "
-                    f"post the {TIER_LABEL[tier]} board somewhere else.")
+            return t("panel.err.reserved", other=tier_label(other),
+                     tier=tier_label(tier))
     return None
 
 
@@ -1191,15 +1327,13 @@ class PanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(description="Post a live control board in this channel.")
+    @app_commands.command(description=L("cmd.panel.desc"))
     @app_commands.guild_only()
-    @app_commands.describe(
-        tier="Which board to post. Defaults to the one this channel is configured for."
-    )
+    @app_commands.describe(tier=L("cmd.panel.tier"))
     @app_commands.choices(tier=[
-        app_commands.Choice(name="🎮 Customs — everyone", value="player"),
-        app_commands.Choice(name="🛡 Admin", value="admin"),
-        app_commands.Choice(name="👑 Super Admin", value="superadmin"),
+        app_commands.Choice(name=L("cmd.panel.choice.player"), value="player"),
+        app_commands.Choice(name=L("cmd.panel.choice.admin"), value="admin"),
+        app_commands.Choice(name=L("cmd.panel.choice.superadmin"), value="superadmin"),
     ])
     async def panel(self, itx: discord.Interaction, tier: app_commands.Choice[str] | None = None):
         chosen = tier.value if tier else _infer_tier(itx.channel_id)
@@ -1218,6 +1352,19 @@ class PanelCog(commands.Cog):
         previous = await panel_svc.save(itx.guild_id, chosen, itx.channel_id, msg.id,
                                         itx.user.id)
         await _drop_old_board(itx.guild, previous)
+
+    @app_commands.command(name="language", description=L("cmd.language.desc"))
+    @app_commands.guild_only()
+    @app_commands.describe(language=L("cmd.language.param"))
+    @app_commands.choices(language=[
+        app_commands.Choice(name=LANG_NAME[code], value=code) for code in LANGS
+    ])
+    async def language(self, itx: discord.Interaction,
+                       language: app_commands.Choice[str]):
+        """Superadmin-only: the language every message in this server is written in."""
+        if not await _guard(itx, SUPER):
+            return
+        await reply(itx, await set_guild_language(itx, language.value))
 
 
 async def setup(bot: commands.Bot):

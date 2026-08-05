@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 
 from bot.core.errors import Blocked, BotError, Conflict, NotFound
 from bot.db import SessionLocal
+from bot.i18n import t
 from bot.services import draft as draft_svc
 from bot.services import maps as maps_svc
 from bot.services import veto as veto_svc
@@ -53,16 +54,16 @@ async def create_custom(
 ) -> Custom:
     fmt = fmt.upper()
     if fmt not in DURATION:
-        raise BotError("Format must be BO1, BO3 or BO5.")
+        raise BotError(t("error.format"))
     if not (MIN_TEAM <= team_size <= MAX_TEAM):
-        raise BotError("Team size must be between 1 and 5 (1v1 to 5v5).")
+        raise BotError(t("error.team_size"))
     if draft_mode not in draft_svc.DRAFT_MODES:
         raise BotError(
-            f"Draft mode must be one of: {', '.join(draft_svc.DRAFT_MODES)}."
+            t("error.draft_mode", modes=", ".join(draft_svc.DRAFT_MODES))
         )
     if captain_method not in draft_svc.CREATE_METHODS:
         raise BotError(
-            f"Captain method must be one of: {', '.join(draft_svc.CREATE_METHODS)}."
+            t("error.captain_method", methods=", ".join(draft_svc.CREATE_METHODS))
         )
     async with SessionLocal() as s:
         # current enabled pool (preserve original case for fallback)
@@ -76,22 +77,16 @@ async def create_custom(
             # "competitive" as the whole map list means the guild's current pool
             chosen = await maps_svc.competitive_names(guild_id)
             if not chosen:
-                raise BotError(
-                    "No competitive pool set for this server yet — an admin can "
-                    "set it in **Admin panel → Maps → Competitive pool**."
-                )
+                raise BotError(t("error.no_comp_pool"))
         if not chosen:
             # No maps given → use the whole enabled (seeded) pool.
             if not enabled_names:
-                raise BotError(
-                    "No maps specified and the server has no enabled map pool. "
-                    "Run `/maps seed` first, or pass maps."
-                )
+                raise BotError(t("error.no_maps_pool"))
             chosen = list(enabled_names)
         elif enabled:  # maps given and a pool exists → enforce membership
             bad = [m for m in chosen if m.lower() not in enabled]
             if bad:
-                raise BotError(f"Maps not in enabled pool: {', '.join(bad)}")
+                raise BotError(t("error.maps_not_enabled", maps=", ".join(bad)))
         try:
             veto_svc.check_pool(fmt, len(chosen))
         except ValueError as e:
@@ -160,7 +155,7 @@ async def get_in_guild(s, custom_id: int, guild_id: int | None) -> Custom:
     """
     c = await s.get(Custom, custom_id)
     if not c or (guild_id is not None and c.guild_id != guild_id):
-        raise NotFound("Custom not found.")
+        raise NotFound(t("error.custom_not_found"))
     return c
 
 
@@ -227,19 +222,19 @@ async def register(
     async with SessionLocal() as s:
         c = await get_in_guild(s, custom_id, guild_id)
         if await _is_banned(c.guild_id, user_id):
-            raise BotError("You are banned from joining games in this server.")
+            raise BotError(t("error.banned"))
         if c.state not in OPEN_STATES:
-            raise BotError(f"Custom #{custom_id} is not open for registration.")
+            raise BotError(t("error.not_open", custom_id=custom_id))
         clash = await find_conflict(s, user_id, c)
         if clash:
             end = clash.start_time + timedelta(hours=clash.duration_h)
-            raise Conflict(
-                f"Conflicts with **{clash.name}** "
-                f"({clash.start_time:%H:%M}–{end:%H:%M})."
-            )
+            raise Conflict(t(
+                "error.conflict", name=clash.name,
+                start=f"{clash.start_time:%H:%M}", end=f"{end:%H:%M}",
+            ))
         exists = await s.get(CustomRegistration, (custom_id, user_id))
         if exists:
-            raise BotError("Already registered.")
+            raise BotError(t("error.already_registered"))
         ids, q = await _ordered_members(s, custom_id)
         size = q.size if q else c.team_size * 2
         s.add(CustomRegistration(custom_id=custom_id, user_id=user_id))
@@ -302,7 +297,7 @@ async def transfer(custom_id: int, new_owner: int) -> Custom:
     async with SessionLocal() as s:
         c = await s.get(Custom, custom_id)
         if not c:
-            raise NotFound("Custom not found.")
+            raise NotFound(t("error.custom_not_found"))
         c.owner_id = new_owner
         await s.commit()
         await s.refresh(c)
@@ -342,10 +337,7 @@ async def delete_custom(custom_id: int, guild: discord.Guild, force: bool = Fals
     async with SessionLocal() as s:
         c = await get_in_guild(s, custom_id, guild.id)
         if is_in_progress(c, guild) and not force:
-            raise Blocked(
-                "Both team VCs are occupied — match in progress. "
-                "End it first, or (superadmin) pass force:true."
-            )
+            raise Blocked(t("error.in_progress_guard"))
         await _purge_channels(c, guild, force)
         await s.execute(delete(QueueMember).where(
             QueueMember.queue_id.in_(
