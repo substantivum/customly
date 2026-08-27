@@ -925,17 +925,18 @@ class RiotApprovalsScreen(_Gated):
 
     async def build(self) -> None:
         if self._pending:
-            self.add_item(self._Picker(self._pending, self.guild))
+            self.add_item(self._Picker(self._pending, self.guild, self.target_id))
         self.add_item(self._Approve(disabled=self.target_id is None))
         self.add_item(self._Deny(disabled=self.target_id is None))
 
     class _Picker(discord.ui.Select):
-        def __init__(self, pending: list[User], guild: discord.Guild):
+        def __init__(self, pending: list[User], guild: discord.Guild, selected: int | None):
             opts = [
                 discord.SelectOption(
                     label=u.riot_id[:100],
                     description=member_name(guild, u.user_id)[:100],
                     value=str(u.user_id),
+                    default=u.user_id == selected,
                 )
                 for u in pending[:25]
             ]
