@@ -1,4 +1,4 @@
-# ValBot
+# Customly
 
 A Discord bot for running Valorant custom matches: registration, team drafting, map veto, ready checks, and staff control panels.
 

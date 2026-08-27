@@ -763,7 +763,7 @@ STRINGS: dict[str, str] = {
     "cmd.help.desc": "Show a walkthrough of every command you can use.",
 
     # ---------------------------------------------------------------- help ---
-    "help.title": "\U0001f4d6 ValBot Command Guide",
+    "help.title": "\U0001f4d6 Customly Command Guide",
     "help.desc": "Everything you can do, grouped by area — grant/admin-only "
                  "entries only show up if you hold that role.",
     "help.section.customs": "\U0001f3ae Customs",
