@@ -759,4 +759,20 @@ STRINGS: dict[str, str] = {
     "cmd.stats.leaderboard.desc": "Wins leaderboard.",
 
     "cmd.queue.status.desc": "Show a custom's queue status.",
+
+    "cmd.help.desc": "Show a walkthrough of every command you can use.",
+
+    # ---------------------------------------------------------------- help ---
+    "help.title": "\U0001f4d6 ValBot Command Guide",
+    "help.desc": "Everything you can do, grouped by area — grant/admin-only "
+                 "entries only show up if you hold that role.",
+    "help.section.customs": "\U0001f3ae Customs",
+    "help.section.match": "⚔️ Match",
+    "help.section.queue": "\U0001f4cb Queue",
+    "help.section.maps": "\U0001f5fa️ Maps",
+    "help.section.profile": "\U0001f464 Profile & Rank",
+    "help.section.stats": "\U0001f4ca Stats",
+    "help.section.panel": "\U0001f39b️ Panel & Language",
+    "help.section.admin": "\U0001f6e1️ Admin",
+    "help.footer": "Type a command to see its own parameters and choices.",
 }

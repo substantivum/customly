@@ -735,4 +735,20 @@ STRINGS: dict[str, str] = {
     "cmd.stats.leaderboard.desc": "Таблица лидеров по победам.",
 
     "cmd.queue.status.desc": "Показать статус очереди кастома.",
+
+    "cmd.help.desc": "Показать список всех доступных вам команд.",
+
+    # -------------------------------------------------------------- помощь ---
+    "help.title": "\U0001f4d6 Гид по командам ValBot",
+    "help.desc": "Всё, что вы можете сделать, по разделам — пункты для "
+                 "админов/суперадминов видны только тем, у кого есть эта роль.",
+    "help.section.customs": "\U0001f3ae Кастомы",
+    "help.section.match": "⚔️ Матч",
+    "help.section.queue": "\U0001f4cb Очередь",
+    "help.section.maps": "\U0001f5fa️ Карты",
+    "help.section.profile": "\U0001f464 Профиль и ранг",
+    "help.section.stats": "\U0001f4ca Статистика",
+    "help.section.panel": "\U0001f39b️ Панель и язык",
+    "help.section.admin": "\U0001f6e1️ Админ",
+    "help.footer": "Введите команду, чтобы увидеть её параметры и варианты выбора.",
 }

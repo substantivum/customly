@@ -26,6 +26,7 @@ COGS = [
     "bot.cogs.admin",
     "bot.cogs.queue",
     "bot.cogs.stats",
+    "bot.cogs.help",
 ]
 
 
