@@ -53,13 +53,29 @@ def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
     cur.close()
 
 
-def _existing_tables() -> set[str]:
+def _needs_baseline_stamp() -> bool:
+    """True if the DB already has app tables but no recorded Alembic revision.
+
+    Two ways to land here: a deployment that predates Alembic entirely (no
+    `alembic_version` table at all), or a previous `upgrade` that got partway
+    through baseline and crashed (SQLite DDL isn't transactional, so Alembic's
+    own `alembic_version` table — which it creates *before* running any
+    migration — survives a failed run even though no revision ever got
+    written to it). Either way the app tables already match baseline, so it
+    should be marked there directly rather than replaying baseline's
+    create_table calls against tables that already exist.
+    """
     if not os.path.exists(settings.db_path):
-        return set()
+        return False
     conn = sqlite3.connect(settings.db_path)
     try:
-        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        return {r[0] for r in rows}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        app_tables = tables - {"alembic_version", "sqlite_sequence"}
+        if not app_tables:
+            return False
+        if "alembic_version" not in tables:
+            return True
+        return conn.execute("SELECT 1 FROM alembic_version LIMIT 1").fetchone() is None
     finally:
         conn.close()
 
@@ -75,12 +91,7 @@ def _run_migrations() -> None:
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
 
-    tables = _existing_tables()
-    if tables and "alembic_version" not in tables:
-        # A deployment that predates Alembic: the old create_all-based
-        # bootstrap already built this exact schema (baseline is a faithful
-        # snapshot of it), so mark it there directly instead of replaying
-        # baseline's create_table calls against tables that already exist.
+    if _needs_baseline_stamp():
         command.stamp(cfg, BASELINE_REVISION)
 
     command.upgrade(cfg, "head")
