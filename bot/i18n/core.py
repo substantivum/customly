@@ -17,7 +17,7 @@ from contextvars import ContextVar, Token
 
 from bot.i18n.catalog import CATALOGS
 
-log = logging.getLogger("valbot.i18n")
+log = logging.getLogger("customly.i18n")
 
 DEFAULT_LANG = "en"
 LANGS: tuple[str, ...] = tuple(CATALOGS)
@@ -26,7 +26,7 @@ LANGS: tuple[str, ...] = tuple(CATALOGS)
 # use when every option is legible to the person who needs it.
 LANG_NAME = {"en": "English", "ru": "Русский"}
 
-_lang: ContextVar[str] = ContextVar("valbot_lang", default=DEFAULT_LANG)
+_lang: ContextVar[str] = ContextVar("customly_lang", default=DEFAULT_LANG)
 
 
 def normalize(lang: str | None) -> str:
@@ -93,7 +93,10 @@ def t(key: str, /, **kwargs) -> str:
             return key
         if lang != DEFAULT_LANG:
             log.warning("untranslated i18n key %r for %r", key, lang)
-    if not kwargs and "{" not in template:
+    if not kwargs:
+        # A template with a literal brace (an example, a code snippet) and no
+        # arguments to fill is not a formatting error — only call .format()
+        # when there's actually something to substitute.
         return template
     try:
         return template.format(**kwargs)

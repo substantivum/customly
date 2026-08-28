@@ -295,14 +295,14 @@ class DraftController:
             rows = await s.execute(
                 select(MatchTeam).where(MatchTeam.match_id == self.match_id)
             )
-            teams = {t.side: t for (t,) in rows.all()}
+            teams = {team.side: team for (team,) in rows.all()}
             for side, cap in (("A", self.cap_a), ("B", self.cap_b)):
                 if side not in teams:
-                    t = MatchTeam(match_id=self.match_id, side=side,
-                                  name=f"Team {side}", captain_id=cap)
-                    s.add(t)
+                    team = MatchTeam(match_id=self.match_id, side=side,
+                                     name=f"Team {side}", captain_id=cap)
+                    s.add(team)
                     await s.flush()  # assign team_id
-                    teams[side] = t
+                    teams[side] = team
             for side, ids in self.team.items():
                 for uid in ids:
                     mp = await s.get(MatchPlayer, (self.match_id, uid))
@@ -353,6 +353,8 @@ class VetoController:
         # (action, side, map, choice) — choice is set on side steps only
         self.history: list[tuple[str, str | None, str, str | None]] = []
         self.sides: list[tuple[str, str, str]] = []   # (map, chooser, choice)
+        # steps recorded since the last persist(); flushed to the DB and cleared there
+        self._pending: list[tuple[int, str, str | None, str, str | None]] = []
 
     @property
     def current(self):
@@ -416,7 +418,6 @@ class VetoController:
 
     def _record(self, action: str, side: str | None, map_name: str,
                 choice: str | None = None) -> None:
-        self._pending = getattr(self, "_pending", [])
         self._pending.append((self.step, action, side, map_name, choice))
         self.history.append((action, side, map_name, choice))
 
@@ -445,7 +446,7 @@ class VetoController:
 
     async def persist(self) -> None:
         async with SessionLocal() as s:
-            for step, action, side, name, choice in getattr(self, "_pending", []):
+            for step, action, side, name, choice in self._pending:
                 if action == "side":
                     continue
                 s.add(MapVeto(match_id=self.match_id, step=step,

@@ -128,6 +128,7 @@ STRINGS: dict[str, str] = {
     "error.match_not_found": "Match not found.",
     "error.result_perm": "Only a captain of this match or an admin can report results.",
     "error.no_draw": "A map can't end in a draw — scores must differ.",
+    "error.result_race": "Two results came in at the same moment — please try reporting again.",
     "error.riot_id": "Riot ID must look like `TenZ#NA1` (Name#TAG).",
     "error.riot_not_found": (
         "No Valorant account found for `{tag}` — check the spelling and try again."
@@ -191,6 +192,8 @@ STRINGS: dict[str, str] = {
     "error.manual_two": "Manual method needs two captain picks.",
     "error.volunteers": "Need at least two volunteers.",
     "error.no_votes": "No votes recorded.",
+    "error.need_two_candidates": "Need votes for at least two different candidates.",
+    "error.need_two_players": "Need at least two players to pick captains from.",
     "error.no_comp_pool": (
         "No competitive pool set for this server yet — an admin can "
         "set it in **Admin panel → Maps → Competitive pool**."
@@ -473,7 +476,9 @@ STRINGS: dict[str, str] = {
 
     # --------------------------------------------------------------- roles ---
     "roles.granted": "Granted **{role}** to {member}.",
+    "roles.already_granted": "{member} already has **{role}**.",
     "roles.revoked": "Revoked **{role}** from {member}.",
+    "roles.not_granted": "{member} did not have **{role}**.",
     "admin.notify_role.set": "Notify role set to {role}.",
     "admin.notify_role.cleared": "Notify role cleared.",
 

@@ -14,7 +14,7 @@ from bot.db import SessionLocal
 from bot.db.models import Guild
 from bot.i18n import DEFAULT_LANG, LANGS, normalize
 
-log = logging.getLogger("valbot.guild")
+log = logging.getLogger("customly.guild")
 
 _lang_cache: dict[int, str] = {}
 

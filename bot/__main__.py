@@ -15,7 +15,7 @@ from bot.i18n.ui import LocalizedTree
 from bot.tasks import start as start_scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-log = logging.getLogger("valbot")
+log = logging.getLogger("customly")
 
 COGS = [
     "bot.cogs.profile",
@@ -30,7 +30,7 @@ COGS = [
 ]
 
 
-class ValBot(commands.Bot):
+class CustomlyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = True       # needed to resolve members + move them
@@ -90,9 +90,11 @@ class ValBot(commands.Bot):
         log.info("Logged in as %s (%s)", self.user, self.user.id)
 
     async def close(self) -> None:
+        from bot.db import engine
         from bot.services import henrik
         await henrik.close()
         await super().close()
+        await engine.dispose()
 
 
 async def _on_app_error(itx: discord.Interaction, error: Exception):
@@ -114,7 +116,7 @@ async def _on_app_error(itx: discord.Interaction, error: Exception):
 
 
 def main() -> None:
-    bot = ValBot()
+    bot = CustomlyBot()
     bot.tree.on_error = _on_app_error
     bot.run(settings.discord_token)
 

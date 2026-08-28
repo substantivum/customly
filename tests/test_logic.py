@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 import pytest
 
 from bot.core.actions import channel_slug, parse_start
+from bot.core.errors import BotError
 from bot.core.naming import team_vc_name
 from bot.services.custom import _overlaps
-from bot.services.draft import alternate_order, pick_order, snake_order
+from bot.services.draft import alternate_order, choose_captains, pick_order, snake_order
 from bot.services.veto import check_pool, veto_plan
 
 
@@ -100,9 +101,9 @@ def test_veto_bo5_follows_the_official_sequence():
 def test_bo3_and_bo5_need_exactly_the_competitive_seven(fmt, pool_size):
     """The published sequences are written for a 7-map pool; anything else
     would need invented steps."""
-    with pytest.raises(ValueError):
+    with pytest.raises(BotError):
         veto_plan(fmt, pool_size)
-    with pytest.raises(ValueError):
+    with pytest.raises(BotError):
         check_pool(fmt, pool_size)
     check_pool(fmt, 7)
 
@@ -119,7 +120,7 @@ def test_veto_bo1_bans_any_pool_down_to_one_map(pool_size):
 
 
 def test_bo1_rejects_a_pool_too_small_to_veto():
-    with pytest.raises(ValueError):
+    with pytest.raises(BotError):
         veto_plan("BO1", 1)
 
 
@@ -127,10 +128,32 @@ def test_bo1_rejects_a_pool_too_large_for_a_view():
     """A VetoView renders one button per remaining map; Discord caps a View at
     25 components, so a pool past that must fail here, not mid-veto."""
     check_pool("BO1", 25)  # exactly the cap is fine
-    with pytest.raises(ValueError):
+    with pytest.raises(BotError):
         check_pool("BO1", 26)
-    with pytest.raises(ValueError):
+    with pytest.raises(BotError):
         veto_plan("BO1", 26)
+
+
+def test_choose_captains_random_rejects_fewer_than_two_players():
+    """A pool of 0 or 1 players can't produce two distinct captains — this must
+    raise a clean BotError, not let random.sample's bare ValueError leak out."""
+    with pytest.raises(BotError):
+        choose_captains("random", [])
+    with pytest.raises(BotError):
+        choose_captains("random", [{"user_id": 1}])
+    a, b = choose_captains("random", [{"user_id": 1}, {"user_id": 2}])
+    assert {a, b} == {1, 2}
+
+
+def test_choose_captains_vote_rejects_a_single_candidate():
+    """If every vote went to the same person, there's no second candidate to
+    pair them with — this must raise, not IndexError on `top[1]`."""
+    with pytest.raises(BotError):
+        choose_captains("vote", [], votes={})
+    with pytest.raises(BotError):
+        choose_captains("vote", [], votes={42: 5})
+    a, b = choose_captains("vote", [], votes={42: 5, 7: 3})
+    assert (a, b) == (42, 7)
 
 
 # --------------------------------------------------------------- roster ------

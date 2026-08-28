@@ -1,8 +1,12 @@
 """Async SQLAlchemy engine + session factory. SQLite tuned with WAL."""
 from __future__ import annotations
 
+import asyncio
 import os
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -11,7 +15,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from bot.config import settings
-from bot.db.models import Base
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Ensure the data dir exists (sqlite file lives on the mounted volume).
 # abspath() so a bare `bot.db` still yields a directory to check.
@@ -43,54 +48,21 @@ def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
     cur.close()
 
 
-def _literal_default(col) -> str | None:  # noqa: ANN001
-    """SQL literal for a column's Python-side default, or None if it has none.
+def _run_migrations() -> None:
+    """Bring the schema up to date via Alembic (alembic/versions/).
 
-    Only scalars are usable in `ALTER TABLE ... ADD COLUMN`; callables (e.g.
-    `_utcnow`) are skipped — the column is simply added nullable/empty.
+    Runs on the plain sync sqlite3 driver, same as alembic/env.py — schema DDL
+    doesn't need asyncio, and pysqlite is stdlib. Blocking, so the caller runs
+    it off the event loop; a boot-time schema check is quick enough that a
+    dedicated migration step before start isn't needed.
     """
-    d = getattr(col, "default", None)
-    if d is None or getattr(d, "is_callable", False):
-        return None
-    arg = getattr(d, "arg", None)
-    if isinstance(arg, bool):
-        return "1" if arg else "0"
-    if isinstance(arg, (int, float)):
-        return str(arg)
-    if isinstance(arg, str):
-        escaped = arg.replace("'", "''")
-        return f"'{escaped}'"
-    return None
-
-
-async def _add_missing_columns(conn) -> None:  # noqa: ANN001
-    """Poor-man's migration: add columns the models gained since the DB was made.
-
-    `create_all` only creates missing *tables*, so a bot upgraded in place would
-    otherwise crash on every new column. SQLite's ADD COLUMN is cheap and
-    non-destructive; existing rows get the column default (or NULL).
-    """
-    for table in Base.metadata.sorted_tables:
-        rows = await conn.execute(text(f"PRAGMA table_info('{table.name}')"))
-        existing = {r[1] for r in rows}
-        if not existing:      # table didn't exist -> create_all just made it
-            continue
-        for col in table.columns:
-            if col.name in existing:
-                continue
-            ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} " \
-                  f"{col.type.compile(engine.dialect)}"
-            default = _literal_default(col)
-            if default is not None:
-                ddl += f" DEFAULT {default}"
-            await conn.execute(text(ddl))
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    command.upgrade(cfg, "head")
 
 
 async def init_db() -> None:
-    """Create tables on first boot, then patch in any new columns.
-    (Use Alembic in production.)"""
+    """Bring the schema up to date, then apply pragmas to this connection."""
+    await asyncio.to_thread(_run_migrations)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await _add_missing_columns(conn)
-        # ensure pragmas applied on this connection too
         await conn.execute(text("PRAGMA journal_mode=WAL"))

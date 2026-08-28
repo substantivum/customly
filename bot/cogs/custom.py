@@ -4,7 +4,6 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
 from bot.config import settings
 from bot.core import actions, audit, board
@@ -73,14 +72,7 @@ class CustomCog(commands.GroupCog, name="custom"):
 
     @app_commands.command(description=L("cmd.custom.list.desc"))
     async def list(self, itx: discord.Interaction):
-        async with SessionLocal() as s:
-            rows = await s.execute(
-                select(Custom).where(
-                    Custom.guild_id == itx.guild_id,
-                    Custom.state.in_(custom_svc.ACTIVE_STATES),
-                )
-            )
-            customs = [r[0] for r in rows.all()]
+        customs = await custom_svc.list_active(itx.guild_id)
         if not customs:
             return await reply(itx, t("custom.none_active"))
         lines = [

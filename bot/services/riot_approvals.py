@@ -10,7 +10,7 @@ from sqlalchemy import select
 from bot.db import SessionLocal
 from bot.db.models import User
 
-log = logging.getLogger("valbot.riot_approvals")
+log = logging.getLogger("customly.riot_approvals")
 
 
 async def list_pending() -> list[User]:

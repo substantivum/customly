@@ -14,6 +14,7 @@ from discord import app_commands
 from sqlalchemy import select
 
 from bot.config import settings
+from bot.core import audit
 from bot.core.errors import PermissionDenied
 from bot.db import SessionLocal
 from bot.db.models import Custom, MemberRole
@@ -72,6 +73,33 @@ async def is_admin(user: discord.Member | discord.User) -> bool:
     return await member_level(user) >= ADMIN
 
 
+async def grant_role(guild_id: int, user_id: int, role: str, actor_id: int) -> bool:
+    """Grant a bot `role` to a member, auditing the change. Returns False (no-op,
+    not audited) if they already had it."""
+    key = (guild_id, user_id, role)
+    async with SessionLocal() as s:
+        if await s.get(MemberRole, key):
+            return False
+        s.add(MemberRole(guild_id=guild_id, user_id=user_id, role=role))
+        await s.commit()
+    await audit.log(guild_id, actor_id, "grant", str(user_id), role=role)
+    return True
+
+
+async def revoke_role(guild_id: int, user_id: int, role: str, actor_id: int) -> bool:
+    """Revoke a bot `role` from a member, auditing the change. Returns False
+    (no-op, not audited) if they didn't have it."""
+    key = (guild_id, user_id, role)
+    async with SessionLocal() as s:
+        row = await s.get(MemberRole, key)
+        if not row:
+            return False
+        await s.delete(row)
+        await s.commit()
+    await audit.log(guild_id, actor_id, "revoke", str(user_id), role=role)
+    return True
+
+
 async def can_manage_custom(custom: Custom, member: discord.Member) -> bool:
     """Owner of the custom, or a superadmin **of the custom's own guild**."""
     if not isinstance(member, discord.Member) or custom.guild_id != member.guild.id:
@@ -95,6 +123,10 @@ def require(role: str) -> Callable:
             return True
         raise PermissionDenied(t("error.need_role_cmd", role=t(f"rank.{role}")))
 
+    # Exposed so a command's real gate can be introspected (see
+    # tests/test_help_permissions.py) rather than trusted to stay in sync with
+    # bot.cogs.help._SECTIONS by convention alone.
+    predicate.min_level = want
     return app_commands.check(predicate)
 
 

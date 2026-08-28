@@ -17,7 +17,7 @@ from bot.i18n.translator import L
 from bot.services import henrik, rank_sync
 from bot.services.identity import normalize_tag
 
-log = logging.getLogger("valbot.profile")
+log = logging.getLogger("customly.profile")
 
 ROLES = ["Duelist", "Controller", "Initiator", "Sentinel", "Flex"]
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.core.errors import BotError
 from bot.i18n import t
 
 
@@ -58,7 +59,7 @@ def pool_requirement(fmt: str) -> str:
 def check_pool(fmt: str, pool_size: int) -> None:
     """Raise unless a pool of `pool_size` can run a `fmt` veto."""
     if fmt not in FORMATS:
-        raise ValueError(t("error.veto_format", formats=", ".join(FORMATS)))
+        raise BotError(t("error.veto_format", formats=", ".join(FORMATS)))
     ok = (
         pool_size == POOL_EXACT[fmt] if fmt in POOL_EXACT
         else pool_size >= POOL_MIN[fmt]
@@ -68,9 +69,9 @@ def check_pool(fmt: str, pool_size: int) -> None:
                 n=pool_size)
         if fmt in POOL_EXACT:
             msg += t("error.veto_pool_hint")
-        raise ValueError(msg)
+        raise BotError(msg)
     if fmt in POOL_MAX and pool_size > POOL_MAX[fmt]:
-        raise ValueError(t("error.veto_pool_max", fmt=fmt, max=POOL_MAX[fmt], n=pool_size))
+        raise BotError(t("error.veto_pool_max", fmt=fmt, max=POOL_MAX[fmt], n=pool_size))
 
 
 def veto_plan(fmt: str, pool_size: int) -> list[VetoStep]:

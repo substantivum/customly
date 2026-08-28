@@ -18,6 +18,12 @@ import asyncio
 import discord
 
 from bot.config import settings
+from bot.core.controllers import (
+    CoinflipController,
+    DraftController,
+    ReadyCheckController,
+    VetoController,
+)
 from bot.core.errors import BotError
 from bot.i18n import current_lang, lang_context, t
 from bot.i18n.ui import LocalizedModal, LocalizedView, bind
@@ -270,9 +276,9 @@ class ReadyCheckView(_TimedView):
     clock when the answer is already known just annoys the people who did click.
     """
 
-    def __init__(self, controller, on_resolve):
+    def __init__(self, controller: ReadyCheckController, on_resolve):
         super().__init__()
-        self.c = controller
+        self.c: ReadyCheckController = controller
         # async () -> None. It takes no arguments on purpose: resolution reads
         # the roster back from the database, so how we got here — everyone
         # answered, or the clock ran out — changes nothing about what happens.
@@ -328,9 +334,9 @@ class CoinflipView(_TimedView):
     """Heads/tails, then Team A or Team B. Only the captain on the clock can
     click; the timer decides for them if they don't."""
 
-    def __init__(self, controller, on_done):
+    def __init__(self, controller: CoinflipController, on_done):
         super().__init__()
-        self.c = controller
+        self.c: CoinflipController = controller
         self.on_done = on_done          # async (controller) -> None
         self.SECONDS = settings.draft_pick_seconds
         self._render()
@@ -385,9 +391,9 @@ class VetoView(_TimedView):
     step, Attack/Defence on a side step. The captain on the clock is the only
     one who can click, and a per-turn timer decides at random if they stall."""
 
-    def __init__(self, controller: "VetoController"):
+    def __init__(self, controller: VetoController):
         super().__init__()
-        self.c = controller
+        self.c: VetoController = controller
         self.on_done = None  # async callback fired once veto completes
         self.SECONDS = settings.veto_pick_seconds
         self._render()
@@ -463,9 +469,9 @@ class DraftView(_TimedView):
     """Captain on the clock picks from a Select of remaining players.
     A per-turn timer auto-picks a random player if the captain stalls."""
 
-    def __init__(self, controller, on_done, guild: discord.Guild | None = None):
+    def __init__(self, controller: DraftController, on_done, guild: discord.Guild | None = None):
         super().__init__()
-        self.c = controller
+        self.c: DraftController = controller
         self.on_done = on_done
         self.guild = guild
         self.SECONDS = settings.draft_pick_seconds

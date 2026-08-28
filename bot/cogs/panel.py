@@ -44,8 +44,10 @@ from bot.core.permissions import (
     RANK_KEY,
     SUPER,
     can_manage_custom,
+    grant_role,
     is_superadmin,
     member_level,
+    revoke_role,
 )
 from bot.core.ui import reply
 from bot.db import SessionLocal
@@ -173,11 +175,9 @@ class AddMapModal(LocalizedModal):
         name = self.name.value.strip()
         if not name:
             return await reply(itx, t("maps.err.empty"))
-        async with SessionLocal() as s:
-            if await s.get(Map, (itx.guild_id, name)):
-                return await reply(itx, t("maps.err.exists", name=name))
-            s.add(Map(guild_id=itx.guild_id, name=name, enabled=True))
-            await s.commit()
+        added = await maps_svc.add_map(itx.guild_id, name, itx.user.id)
+        if not added:
+            return await reply(itx, t("maps.err.exists", name=name))
         await self.screen.repaint()        # redraw the pool behind the modal
         board.schedule(itx.guild)
         await reply(itx, t("maps.added", name=name))
@@ -762,17 +762,14 @@ class MapsScreen(_Gated):
 
         async def callback(self, itx: discord.Interaction):
             flipped = []
-            async with SessionLocal() as s:
-                for name in self.values:
-                    m = await s.get(Map, (itx.guild_id, name))
-                    if not m:  # removed by someone else meanwhile
-                        continue
-                    m.enabled = not m.enabled
-                    flipped.append(t(
-                        "screen.maps.flipped", name=name,
-                        state=t("common.enabled" if m.enabled else "common.disabled"),
-                    ))
-                await s.commit()
+            for name in self.values:
+                state = await maps_svc.toggle_map(itx.guild_id, name, itx.user.id)
+                if state is None:  # removed by someone else meanwhile
+                    continue
+                flipped.append(t(
+                    "screen.maps.flipped", name=name,
+                    state=t("common.enabled" if state else "common.disabled"),
+                ))
             await self.view.reload(itx)
             board.schedule(itx.guild)
             await reply(itx, "\n".join(flipped) if flipped
@@ -794,9 +791,9 @@ class MapsScreen(_Gated):
                              options=opts, min_values=0, max_values=len(opts), row=1)
 
         async def callback(self, itx: discord.Interaction):
-            in_pool, _ = await maps_svc.set_competitive(itx.guild_id, list(self.values))
-            await audit.log(itx.guild_id, itx.user.id, "maps_competitive",
-                            meta=",".join(in_pool))
+            in_pool, _ = await maps_svc.set_competitive(
+                itx.guild_id, list(self.values), itx.user.id
+            )
             await self.view.reload(itx)
             board.schedule(itx.guild)
             await reply(
@@ -1098,21 +1095,15 @@ class RolesScreen(_Gated):
             view: RolesScreen = self.view
             if not await is_superadmin(itx.user):
                 return await reply(itx, t("error.superadmin_only"))
-            key = (itx.guild_id, view.target.id, view.role)
-            async with SessionLocal() as s:
-                row = await s.get(MemberRole, key)
-                if self.grant and not row:
-                    s.add(MemberRole(guild_id=key[0], user_id=key[1], role=key[2]))
-                elif not self.grant and row:
-                    await s.delete(row)
-                await s.commit()
-            action = "grant" if self.grant else "revoke"
-            await audit.log(itx.guild_id, itx.user.id, action, str(view.target.id),
-                            role=view.role)
+            if self.grant:
+                applied = await grant_role(itx.guild_id, view.target.id, view.role, itx.user.id)
+                msg_key = "roles.granted" if applied else "roles.already_granted"
+            else:
+                applied = await revoke_role(itx.guild_id, view.target.id, view.role, itx.user.id)
+                msg_key = "roles.revoked" if applied else "roles.not_granted"
             await view.reload(itx)
             board.schedule(itx.guild)
-            await reply(itx, t("roles.granted" if self.grant else "roles.revoked",
-                               role=t(f"role.{view.role}"),
+            await reply(itx, t(msg_key, role=t(f"role.{view.role}"),
                                member=view.target.mention))
 
 
@@ -1389,6 +1380,7 @@ class SuperBoard(_BoardView):
 
 
 BOARD_VIEW = {"player": PlayerBoard, "admin": AdminBoard, "superadmin": SuperBoard}
+board.register_board_views(BOARD_VIEW)
 
 
 # ================================================================ the cog ====

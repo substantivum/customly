@@ -2,6 +2,7 @@
 deletion/prune with the live-occupancy guard."""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import NamedTuple
@@ -14,6 +15,7 @@ from bot.db import SessionLocal
 from bot.i18n import t
 from bot.services import draft as draft_svc
 from bot.services import maps as maps_svc
+from bot.services import queue_svc
 from bot.services import veto as veto_svc
 from bot.services import voice
 from bot.services.bans import is_banned as _is_banned
@@ -87,10 +89,7 @@ async def create_custom(
             bad = [m for m in chosen if m.lower() not in enabled]
             if bad:
                 raise BotError(t("error.maps_not_enabled", maps=", ".join(bad)))
-        try:
-            veto_svc.check_pool(fmt, len(chosen))
-        except ValueError as e:
-            raise BotError(str(e))
+        veto_svc.check_pool(fmt, len(chosen))
 
         c = Custom(
             guild_id=guild_id,
@@ -147,6 +146,19 @@ async def find_conflict(s, user_id: int, target: Custom) -> Custom | None:
     return None
 
 
+async def list_active(guild_id: int) -> list[Custom]:
+    """Customs still in play for this guild — the definition of "active" lives
+    here once, rather than being re-filtered ad hoc at each call site."""
+    async with SessionLocal() as s:
+        rows = await s.execute(
+            select(Custom).where(
+                Custom.guild_id == guild_id,
+                Custom.state.in_(ACTIVE_STATES),
+            )
+        )
+        return [r[0] for r in rows.all()]
+
+
 async def get_in_guild(s, custom_id: int, guild_id: int | None) -> Custom:
     """Load a custom, refusing ids that belong to another guild.
 
@@ -172,7 +184,13 @@ class Roster(NamedTuple):
 
 
 async def _ordered_members(s, custom_id: int) -> tuple[list[int], Queue | None]:
-    """Everyone signed up, in join order — the queue is the source of truth."""
+    """Everyone signed up, in join order — the queue is the source of truth.
+
+    Falls back to `custom_registrations` only for a custom predating the
+    `queues` table (every custom made by `create_custom` gets a `Queue` row up
+    front) — `queue_svc.members` is the single source for the queue-backed case,
+    so this and `queue_svc.is_full` can't drift apart on what "full" means.
+    """
     q = (await s.execute(
         select(Queue).where(Queue.custom_id == custom_id)
     )).scalar_one_or_none()
@@ -183,12 +201,7 @@ async def _ordered_members(s, custom_id: int) -> tuple[list[int], Queue | None]:
             .order_by(CustomRegistration.reg_at)
         )
         return [r[0] for r in rows.all()], None
-    rows = await s.execute(
-        select(QueueMember.user_id)
-        .where(QueueMember.queue_id == q.queue_id)
-        .order_by(QueueMember.joined_at)
-    )
-    return [r[0] for r in rows.all()], q
+    return await queue_svc.members(q.queue_id), q
 
 
 async def roster(custom_id: int) -> Roster:
@@ -208,6 +221,22 @@ async def roster(custom_id: int) -> Roster:
     return Roster(ids[:size], ids[size:], size)
 
 
+_locks: dict[int, asyncio.Lock] = {}
+
+
+def _lock_for(custom_id: int) -> asyncio.Lock:
+    """One lock per custom, so concurrent register()/leave() calls against the
+    same custom serialize instead of both reading the same roster before either
+    commits — otherwise two racing joins can each compute the same waitlist
+    position, or both land on the wrong side of the `full` state transition.
+    Locks accumulate for the process lifetime; an asyncio.Lock is a few dozen
+    bytes, negligible next to how few customs a guild ever creates."""
+    lock = _locks.get(custom_id)
+    if lock is None:
+        lock = _locks[custom_id] = asyncio.Lock()
+    return lock
+
+
 def _state_for(c: Custom, signed_up: int, size: int) -> None:
     """Keep `full` in step with the roster, without closing registration —
     a full custom still takes subs."""
@@ -219,32 +248,33 @@ async def register(
     custom_id: int, user_id: int, guild_id: int | None = None
 ) -> tuple[Custom, int]:
     """Sign up. Returns (custom, waitlist_position) — 0 when they're a starter."""
-    async with SessionLocal() as s:
-        c = await get_in_guild(s, custom_id, guild_id)
-        if await _is_banned(c.guild_id, user_id):
-            raise BotError(t("error.banned"))
-        if c.state not in OPEN_STATES:
-            raise BotError(t("error.not_open", custom_id=custom_id))
-        clash = await find_conflict(s, user_id, c)
-        if clash:
-            end = clash.start_time + timedelta(hours=clash.duration_h)
-            raise Conflict(t(
-                "error.conflict", name=clash.name,
-                start=f"{clash.start_time:%H:%M}", end=f"{end:%H:%M}",
-            ))
-        exists = await s.get(CustomRegistration, (custom_id, user_id))
-        if exists:
-            raise BotError(t("error.already_registered"))
-        ids, q = await _ordered_members(s, custom_id)
-        size = q.size if q else c.team_size * 2
-        s.add(CustomRegistration(custom_id=custom_id, user_id=user_id))
-        if q:  # mirror into the queue
-            s.add(QueueMember(queue_id=q.queue_id, user_id=user_id))
-        _state_for(c, len(ids) + 1, size)
-        await s.commit()
-        await s.refresh(c)
-        # they went in last: seat len(ids), 0-based
-        return c, max(0, len(ids) - size + 1)
+    async with _lock_for(custom_id):
+        async with SessionLocal() as s:
+            c = await get_in_guild(s, custom_id, guild_id)
+            if await _is_banned(c.guild_id, user_id):
+                raise BotError(t("error.banned"))
+            if c.state not in OPEN_STATES:
+                raise BotError(t("error.not_open", custom_id=custom_id))
+            clash = await find_conflict(s, user_id, c)
+            if clash:
+                end = clash.start_time + timedelta(hours=clash.duration_h)
+                raise Conflict(t(
+                    "error.conflict", name=clash.name,
+                    start=f"{clash.start_time:%H:%M}", end=f"{end:%H:%M}",
+                ))
+            exists = await s.get(CustomRegistration, (custom_id, user_id))
+            if exists:
+                raise BotError(t("error.already_registered"))
+            ids, q = await _ordered_members(s, custom_id)
+            size = q.size if q else c.team_size * 2
+            s.add(CustomRegistration(custom_id=custom_id, user_id=user_id))
+            if q:  # mirror into the queue
+                s.add(QueueMember(queue_id=q.queue_id, user_id=user_id))
+            _state_for(c, len(ids) + 1, size)
+            await s.commit()
+            await s.refresh(c)
+            # they went in last: seat len(ids), 0-based
+            return c, max(0, len(ids) - size + 1)
 
 
 async def leave(
@@ -252,26 +282,27 @@ async def leave(
 ) -> tuple[Custom, int | None]:
     """Drop out. Returns (custom, promoted_user_id) — the first sub moves up
     into the seat a starter vacated."""
-    async with SessionLocal() as s:
-        c = await get_in_guild(s, custom_id, guild_id)
-        ids, q = await _ordered_members(s, custom_id)
-        size = q.size if q else c.team_size * 2
-        promoted = None
-        if user_id in ids:
-            if ids.index(user_id) < size and len(ids) > size:
-                promoted = ids[size]
-            ids.remove(user_id)
-        reg = await s.get(CustomRegistration, (custom_id, user_id))
-        if reg:
-            await s.delete(reg)
-        if q:
-            qm = await s.get(QueueMember, (q.queue_id, user_id))
-            if qm:
-                await s.delete(qm)
-        _state_for(c, len(ids), size)
-        await s.commit()
-        await s.refresh(c)
-        return c, promoted
+    async with _lock_for(custom_id):
+        async with SessionLocal() as s:
+            c = await get_in_guild(s, custom_id, guild_id)
+            ids, q = await _ordered_members(s, custom_id)
+            size = q.size if q else c.team_size * 2
+            promoted = None
+            if user_id in ids:
+                if ids.index(user_id) < size and len(ids) > size:
+                    promoted = ids[size]
+                ids.remove(user_id)
+            reg = await s.get(CustomRegistration, (custom_id, user_id))
+            if reg:
+                await s.delete(reg)
+            if q:
+                qm = await s.get(QueueMember, (q.queue_id, user_id))
+                if qm:
+                    await s.delete(qm)
+            _state_for(c, len(ids), size)
+            await s.commit()
+            await s.refresh(c)
+            return c, promoted
 
 
 async def clear_stale_ready_checks() -> list[int]:

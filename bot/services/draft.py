@@ -60,7 +60,10 @@ def choose_captains(
             raise BotError(t("error.manual_two"))
         return manual
     if method == "random":
-        a, b = random.sample([p["user_id"] for p in players], 2)
+        ids = [p["user_id"] for p in players]
+        if len(ids) < 2:
+            raise BotError(t("error.need_two_players"))
+        a, b = random.sample(ids, 2)
         return a, b
     if method == "highest_rr":
         ranked = ranks.shuffled_by_key(players, key=lambda p: p.get("cur_rr") or -1)
@@ -84,6 +87,8 @@ def choose_captains(
     if method == "vote":
         if not votes:
             raise BotError(t("error.no_votes"))
+        if len(votes) < 2:
+            raise BotError(t("error.need_two_candidates"))
         top = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
         return top[0][0], top[1][0]
     raise BotError(t("error.unknown_captain", method=method))

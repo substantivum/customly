@@ -121,6 +121,7 @@ STRINGS: dict[str, str] = {
     "error.match_not_found": "Матч не найден.",
     "error.result_perm": "Результаты может внести только капитан этого матча или админ.",
     "error.no_draw": "Карта не может закончиться ничьёй — счёт должен различаться.",
+    "error.result_race": "Два результата пришли одновременно — попробуйте отправить ещё раз.",
     "error.riot_id": "Riot ID должен быть вида `TenZ#NA1` (Имя#ТЕГ).",
     "error.riot_not_found": (
         "Аккаунт Valorant `{tag}` не найден — проверьте написание и попробуйте снова."
@@ -180,6 +181,8 @@ STRINGS: dict[str, str] = {
     "error.manual_two": "Для ручного способа нужно выбрать двух капитанов.",
     "error.volunteers": "Нужно минимум два добровольца.",
     "error.no_votes": "Голоса не зафиксированы.",
+    "error.need_two_candidates": "Нужны голоса минимум за двух разных кандидатов.",
+    "error.need_two_players": "Нужно минимум два игрока, чтобы выбрать капитанов.",
     "error.no_comp_pool": (
         "Соревновательный пул для сервера ещё не задан — админ может задать его "
         "в **Панель админа → Карты → Соревновательный пул**."
@@ -459,7 +462,9 @@ STRINGS: dict[str, str] = {
     ),
 
     "roles.granted": "Роль **{role}** выдана: {member}.",
+    "roles.already_granted": "У {member} уже есть роль **{role}**.",
     "roles.revoked": "Роль **{role}** снята: {member}.",
+    "roles.not_granted": "У {member} не было роли **{role}**.",
     "admin.notify_role.set": "Роль уведомлений установлена: {role}.",
     "admin.notify_role.cleared": "Роль уведомлений сброшена.",
 

@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.core.ui import reply
+from bot.db import SessionLocal
 from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import custom as custom_svc
@@ -17,6 +18,8 @@ class QueueCog(commands.GroupCog, name="queue"):
 
     @app_commands.command(description=L("cmd.queue.status.desc"))
     async def status(self, itx: discord.Interaction, custom_id: int):
+        async with SessionLocal() as s:
+            await custom_svc.get_in_guild(s, custom_id, itx.guild_id)
         r = await custom_svc.roster(custom_id)
         if not r.size:
             return await reply(itx, t("queue.none"))

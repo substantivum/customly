@@ -24,6 +24,7 @@ from bot.core.controllers import (
 from bot.core.embeds import DASH, EMBED_COLOR, custom_registration_embed, member_name
 from bot.core.errors import BotError
 from bot.core.naming import channel_slug
+from bot.core.permissions import can_manage_custom, is_admin
 from bot.core.views import (
     CoinflipView,
     DraftView,
@@ -49,7 +50,7 @@ from bot.services import draft as draft_svc
 from bot.services import queue_svc, rank_sync, voice
 from bot.services import veto as veto_svc
 
-log = logging.getLogger("valbot.flow")
+log = logging.getLogger("customly.flow")
 
 # active veto controllers keyed by match_id
 ACTIVE_VETO: dict[int, VetoController] = {}
@@ -379,8 +380,6 @@ async def transfer_custom(
 ) -> Custom:
     """Hand a custom over: persist, redraw the registration embed, and tell the
     new owner — in DM, and in the custom's own channel so the room sees it too."""
-    from bot.core.permissions import can_manage_custom
-
     async with SessionLocal() as s:
         c = await custom_svc.get_in_guild(s, custom_id, itx.guild_id)
     if not await can_manage_custom(c, itx.user):
@@ -467,8 +466,6 @@ async def _run_draft(guild, channel, custom, match_id, cap_a, cap_b, pool, first
 
 
 async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
-    import json
-
     pool = json.loads(custom.map_pool)
     veto_ctl = VetoController(match_id, custom.format, pool, cap_a, cap_b, guild=guild)
     ACTIVE_VETO[match_id] = veto_ctl
@@ -638,7 +635,7 @@ async def begin_match(
         c = await custom_svc.get_in_guild(s, custom_id, guild.id)
     if c.state == "ready":
         raise BotError(t("error.ready_running", custom_id=custom_id))
-    if c.state in ("captains", "veto", "live"):
+    if c.state in ("veto", "live"):
         raise BotError(
             t("error.match_in_progress", custom_id=custom_id, state=c.state)
         )
@@ -646,7 +643,7 @@ async def begin_match(
     # got its pool rule would otherwise strand two drafted teams at the veto.
     try:
         veto_svc.check_pool(c.format, len(json.loads(c.map_pool)))
-    except ValueError as e:
+    except BotError as e:
         raise BotError(t("error.pool_recreate", reason=e))
     # The method is fixed when the custom is created; `captains` overrides it
     # only where a caller genuinely needs to (e.g. `/match start captains:manual`).
@@ -763,8 +760,6 @@ async def start_match(
 ):
     """Someone pressed Start. Checks they may, cancels any ready check that's on
     the clock, and reports back on the interaction."""
-    from bot.core.permissions import can_manage_custom
-
     # Starting a match makes several REST calls (channel perms, messages) before
     # it can answer — ack the interaction first or the token expires (10062).
     if not itx.response.is_done():
@@ -1015,8 +1010,6 @@ async def is_match_captain(match_id: int, user_id: int) -> bool:
 
 async def _can_run_custom(custom_id: int, member: discord.Member) -> bool:
     """Captain of the custom's match, or owner/admin of the custom's guild."""
-    from bot.core.permissions import can_manage_custom, is_admin
-
     async with SessionLocal() as s:
         c = await s.get(Custom, custom_id)
     if not c or not isinstance(member, discord.Member) or c.guild_id != member.guild.id:

@@ -4,12 +4,9 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
 from bot.core.permissions import require
 from bot.core.ui import reply
-from bot.db import SessionLocal
-from bot.db.models import Map
 from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import maps as maps_svc
@@ -24,9 +21,7 @@ class MapsCog(commands.GroupCog, name="maps"):
 
     @app_commands.command(description=L("cmd.maps.list.desc"))
     async def list(self, itx: discord.Interaction):
-        async with SessionLocal() as s:
-            rows = await s.execute(select(Map).where(Map.guild_id == itx.guild_id))
-            maps = [r[0] for r in rows.all()]
+        maps = await maps_svc.all_maps(itx.guild_id)
         if not maps:
             return await reply(itx, t("maps.none_configured"))
         lines = [
@@ -46,7 +41,9 @@ class MapsCog(commands.GroupCog, name="maps"):
     @require("admin")
     @app_commands.describe(maps=L("cmd.maps.competitive.maps"))
     async def competitive(self, itx: discord.Interaction, maps: str = ""):
-        in_pool, unknown = await maps_svc.set_competitive(itx.guild_id, maps.split(","))
+        in_pool, unknown = await maps_svc.set_competitive(
+            itx.guild_id, maps.split(","), itx.user.id
+        )
         msg = (t("maps.comp_set", maps=", ".join(in_pool)) if in_pool
                else t("maps.comp_cleared"))
         if unknown:
@@ -56,32 +53,21 @@ class MapsCog(commands.GroupCog, name="maps"):
     @app_commands.command(description=L("cmd.maps.add.desc"))
     @require("admin")
     async def add(self, itx: discord.Interaction, name: str):
-        async with SessionLocal() as s:
-            if not await s.get(Map, (itx.guild_id, name)):
-                s.add(Map(guild_id=itx.guild_id, name=name, enabled=True))
-                await s.commit()
-        await reply(itx, t("maps.added_cmd", name=name))
+        added = await maps_svc.add_map(itx.guild_id, name, itx.user.id)
+        await reply(itx, t("maps.added_cmd" if added else "maps.err.exists", name=name))
 
     @app_commands.command(description=L("cmd.maps.remove.desc"))
     @require("admin")
     async def remove(self, itx: discord.Interaction, name: str):
-        async with SessionLocal() as s:
-            m = await s.get(Map, (itx.guild_id, name))
-            if m:
-                await s.delete(m)
-                await s.commit()
-        await reply(itx, t("maps.removed", name=name))
+        removed = await maps_svc.remove_map(itx.guild_id, name, itx.user.id)
+        await reply(itx, t("maps.removed" if removed else "maps.no_such", name=name))
 
     @app_commands.command(description=L("cmd.maps.toggle.desc"))
     @require("admin")
     async def toggle(self, itx: discord.Interaction, name: str):
-        async with SessionLocal() as s:
-            m = await s.get(Map, (itx.guild_id, name))
-            if not m:
-                return await reply(itx, t("maps.no_such"))
-            m.enabled = not m.enabled
-            state = m.enabled
-            await s.commit()
+        state = await maps_svc.toggle_map(itx.guild_id, name, itx.user.id)
+        if state is None:
+            return await reply(itx, t("maps.no_such"))
         await reply(itx, t("maps.toggled", name=name,
                            state=t("common.enabled" if state else "common.disabled")))
 

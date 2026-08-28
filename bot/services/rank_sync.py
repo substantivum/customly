@@ -11,7 +11,7 @@ from bot.db import SessionLocal
 from bot.db.models import User
 from bot.services import henrik
 
-log = logging.getLogger("valbot.rank_sync")
+log = logging.getLogger("customly.rank_sync")
 
 RANK_TTL = timedelta(minutes=10)
 

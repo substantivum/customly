@@ -7,10 +7,10 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot.core import audit
-from bot.core.permissions import is_superadmin, require
+from bot.core.permissions import grant_role, is_superadmin, require, revoke_role
 from bot.core.ui import reply
 from bot.db import SessionLocal
-from bot.db.models import AuditLog, MemberRole
+from bot.db.models import AuditLog
 from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import bans as bans_svc, guild_svc
@@ -32,12 +32,9 @@ class AdminCog(commands.GroupCog, name="admin"):
     ):
         if not await is_superadmin(itx.user):
             return await reply(itx, t("error.superadmin_only"))
-        async with SessionLocal() as s:
-            if not await s.get(MemberRole, (itx.guild_id, member.id, role.value)):
-                s.add(MemberRole(guild_id=itx.guild_id, user_id=member.id, role=role.value))
-                await s.commit()
-        await reply(itx, t("roles.granted", role=t(f"role.{role.value}"),
-                           member=member.mention))
+        granted = await grant_role(itx.guild_id, member.id, role.value, itx.user.id)
+        await reply(itx, t("roles.granted" if granted else "roles.already_granted",
+                           role=t(f"role.{role.value}"), member=member.mention))
 
     @app_commands.command(description=L("cmd.admin.revoke.desc"))
     @app_commands.choices(role=_ROLE_CHOICES)
@@ -46,23 +43,19 @@ class AdminCog(commands.GroupCog, name="admin"):
     ):
         if not await is_superadmin(itx.user):
             return await reply(itx, t("error.superadmin_only"))
-        async with SessionLocal() as s:
-            mr = await s.get(MemberRole, (itx.guild_id, member.id, role.value))
-            if mr:
-                await s.delete(mr)
-                await s.commit()
-        await reply(itx, t("roles.revoked", role=t(f"role.{role.value}"),
-                           member=member.mention))
+        revoked = await revoke_role(itx.guild_id, member.id, role.value, itx.user.id)
+        await reply(itx, t("roles.revoked" if revoked else "roles.not_granted",
+                           role=t(f"role.{role.value}"), member=member.mention))
 
     @app_commands.command(description=L("cmd.admin.audit.desc"))
     @require("admin")
-    async def audit(self, itx: discord.Interaction, limit: int = 10):
+    async def audit(self, itx: discord.Interaction, limit: app_commands.Range[int, 1, 25] = 10):
         async with SessionLocal() as s:
             rows = await s.execute(
                 select(AuditLog)
                 .where(AuditLog.guild_id == itx.guild_id)
                 .order_by(AuditLog.id.desc())
-                .limit(min(limit, 25))
+                .limit(limit)
             )
             entries = [r[0] for r in rows.all()]
         if not entries:

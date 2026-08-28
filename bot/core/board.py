@@ -29,7 +29,7 @@ from bot.services import guild_svc
 from bot.services import maps as maps_svc
 from bot.services import panel_svc
 
-log = logging.getLogger("valbot.board")
+log = logging.getLogger("customly.board")
 
 SHOW_MAX = 8           # customs listed on a board before it says "…and N more"
 COALESCE_SECONDS = 1.5  # burst window: many joins in a row cost one edit
@@ -242,6 +242,18 @@ async def embed_for(guild: discord.Guild, tier: str) -> discord.Embed:
     return await EMBED_FOR[tier](guild)
 
 
+# Per-tier persistent View class, handed in by bot.cogs.panel at import time
+# (register_board_views, below) so this module never has to import cogs — the
+# View classes are UI presentation and belong in the cogs layer, but redrawing
+# a board needs one, so cogs registers rather than core reaching upward for it.
+_board_views: dict[str, type[discord.ui.View]] = {}
+
+
+def register_board_views(views: dict[str, type[discord.ui.View]]) -> None:
+    """Called once by bot.cogs.panel at import time."""
+    _board_views.update(views)
+
+
 # ------------------------------------------------------------------ refresh ---
 async def refresh(guild: discord.Guild) -> None:
     """Redraw every board registered for this guild. Boards whose message is
@@ -250,8 +262,6 @@ async def refresh(guild: discord.Guild) -> None:
     Both the embed *and* the components are rewritten: button labels are part of
     the message, so a language change would otherwise leave a Russian board
     wearing English buttons until someone re-ran `/panel`."""
-    from bot.cogs.panel import BOARD_VIEW
-
     async with use_lang(guild.id):
         for b in await panel_svc.boards(guild.id):
             channel = guild.get_channel(b.channel_id)
@@ -260,8 +270,9 @@ async def refresh(guild: discord.Guild) -> None:
                 continue
             try:
                 msg = await channel.fetch_message(b.message_id)
-                view = BOARD_VIEW[b.tier]()
-                await msg.edit(embed=await embed_for(guild, b.tier), view=view)
+                view_cls = _board_views.get(b.tier)
+                await msg.edit(embed=await embed_for(guild, b.tier),
+                               view=view_cls() if view_cls else None)
             except discord.NotFound:
                 await panel_svc.forget(guild.id, b.tier)
             except discord.HTTPException as e:

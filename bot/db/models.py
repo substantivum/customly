@@ -32,6 +32,13 @@ class Base(DeclarativeBase):
 
 # ---------------------------------------------------------------- identity ---
 class Guild(Base):
+    """A row here is created lazily, the first time a guild's language or
+    notify-role is set (see bot.services.guild_svc) — not the moment the bot
+    joins. Every other table's `guild_id` is therefore a bare Discord snowflake,
+    not a ForeignKey to this table: a guild can have customs, maps, matches
+    and more long before (or without ever) getting a `guilds` row.
+    """
+
     __tablename__ = "guilds"
     guild_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     settings_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -39,6 +46,12 @@ class Guild(Base):
 
 
 class User(Base):
+    """A row here only exists for a player who has completed Riot registration
+    (see bot.services.identity) — anyone can join a queue or play a match
+    without one. Every other table's `user_id` is therefore a bare Discord
+    snowflake, not a ForeignKey to this table.
+    """
+
     __tablename__ = "users"
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)  # discord id
     riot_id: Mapped[str | None] = mapped_column(String(32))          # canonical Name#Tag, from API
@@ -121,7 +134,7 @@ class Custom(Base):
     vc_b: Mapped[int | None] = mapped_column(Integer)
     config_chan: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(16), default="registration")
-    match_id: Mapped[int | None] = mapped_column(Integer)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.match_id"))
     owner_id: Mapped[int] = mapped_column(Integer)           # transferable manager
     created_by: Mapped[int] = mapped_column(Integer)         # immutable creator
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
@@ -142,7 +155,9 @@ class Queue(Base):
     __tablename__ = "queues"
     queue_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id: Mapped[int] = mapped_column(Integer)
-    custom_id: Mapped[int | None] = mapped_column(Integer)
+    custom_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customs.custom_id", ondelete="CASCADE")
+    )
     type: Mapped[str] = mapped_column(String(16))           # 5v5|10man|scrim|tournament
     size: Mapped[int] = mapped_column(Integer)
     format: Mapped[str | None] = mapped_column(String(4))
@@ -164,6 +179,10 @@ class Match(Base):
     match_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id: Mapped[int] = mapped_column(Integer)
     tournament_id: Mapped[int | None] = mapped_column(Integer)
+    # Deliberately not a ForeignKey: deleting/pruning a custom (custom.py
+    # delete_custom) never touches its matches — match history is meant to
+    # outlive the custom, so this can and does legitimately point at a
+    # custom_id that no longer exists in `customs`.
     custom_id: Mapped[int | None] = mapped_column(Integer)
     format: Mapped[str] = mapped_column(String(4))
     state: Mapped[str] = mapped_column(String(16), default="created")
@@ -182,7 +201,7 @@ class Match(Base):
 class MatchTeam(Base):
     __tablename__ = "match_teams"
     team_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    match_id: Mapped[int] = mapped_column(Integer)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.match_id", ondelete="CASCADE"))
     side: Mapped[str] = mapped_column(String(1))            # A|B
     name: Mapped[str | None] = mapped_column(String(64))
     logo_url: Mapped[str | None] = mapped_column(Text)
@@ -192,9 +211,13 @@ class MatchTeam(Base):
 
 class MatchPlayer(Base):
     __tablename__ = "match_players"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
+    # Not a ForeignKey to `users`: `users` only holds players who completed
+    # Riot registration, but any Discord member can join a queue and play.
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    team_id: Mapped[int | None] = mapped_column(Integer)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("match_teams.team_id"))
     side: Mapped[str | None] = mapped_column(String(1))
     checked_in: Mapped[bool] = mapped_column(Boolean, default=False)
     ready: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -203,7 +226,9 @@ class MatchPlayer(Base):
 
 class MapVeto(Base):
     __tablename__ = "map_veto"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
     step: Mapped[int] = mapped_column(Integer, primary_key=True)
     action: Mapped[str] = mapped_column(String(8))         # ban|pick|decider
     team_side: Mapped[str | None] = mapped_column(String(1))
@@ -220,7 +245,9 @@ class MatchMapSide(Base):
     """
 
     __tablename__ = "match_map_sides"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
     map_index: Mapped[int] = mapped_column(Integer, primary_key=True)   # 1-based
     map_name: Mapped[str] = mapped_column(String(32))
     team_side: Mapped[str] = mapped_column(String(1))      # A|B — who chose
@@ -229,7 +256,9 @@ class MatchMapSide(Base):
 
 class MatchResult(Base):
     __tablename__ = "match_results"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
     map_index: Mapped[int] = mapped_column(Integer, primary_key=True)
     map_name: Mapped[str] = mapped_column(String(32))
     score_a: Mapped[int] = mapped_column(Integer)
@@ -240,7 +269,9 @@ class MatchResult(Base):
 # ------------------------------------------------------------------ drafts ---
 class Draft(Base):
     __tablename__ = "drafts"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
     method: Mapped[str] = mapped_column(String(16))
     state: Mapped[str] = mapped_column(String(16), default="pending")
     turn_side: Mapped[str | None] = mapped_column(String(1))
@@ -249,9 +280,12 @@ class Draft(Base):
 
 class DraftPick(Base):
     __tablename__ = "draft_picks"
-    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.match_id", ondelete="CASCADE"), primary_key=True
+    )
     pick_no: Mapped[int] = mapped_column(Integer, primary_key=True)
     team_side: Mapped[str] = mapped_column(String(1))
+    # Not a ForeignKey to `users` — see MatchPlayer.user_id.
     user_id: Mapped[int] = mapped_column(Integer)
     auto: Mapped[bool] = mapped_column(Boolean, default=False)
 

@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from bot.core import actions
 from bot.core.errors import BotError, PermissionDenied
@@ -97,13 +98,26 @@ class MatchCog(commands.GroupCog, name="match"):
             raise PermissionDenied(t("error.result_perm"))
 
         winner = "A" if score_a > score_b else "B"
-        async with SessionLocal() as s:
-            idx = len((await s.execute(
-                select(MatchResult).where(MatchResult.match_id == match_id)
-            )).all())
-            s.add(MatchResult(match_id=match_id, map_index=idx, map_name=map_name,
-                              score_a=score_a, score_b=score_b, winner_side=winner))
-            await s.commit()
+        # `map_index` is part of MatchResult's primary key. Two near-simultaneous
+        # submissions (both captains reporting at once) can both count the same
+        # number of existing rows before either commits; the second's insert then
+        # collides on the PK instead of silently duplicating — retry with a fresh
+        # count rather than let that IntegrityError crash the interaction.
+        attempts = 3
+        for attempt in range(attempts):
+            async with SessionLocal() as s:
+                idx = len((await s.execute(
+                    select(MatchResult).where(MatchResult.match_id == match_id)
+                )).all())
+                s.add(MatchResult(match_id=match_id, map_index=idx, map_name=map_name,
+                                  score_a=score_a, score_b=score_b, winner_side=winner))
+                try:
+                    await s.commit()
+                    break
+                except IntegrityError:
+                    await s.rollback()
+                    if attempt == attempts - 1:
+                        raise BotError(t("error.result_race"))
         await reply(itx, t("match.result_recorded", map=map_name, score_a=score_a,
                            score_b=score_b, winner=winner))
 

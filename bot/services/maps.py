@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from bot.core import audit
 from bot.db import SessionLocal
 from bot.db.models import Map
 
@@ -51,7 +52,9 @@ async def competitive_names(guild_id: int) -> list[str]:
         return [r[0] for r in rows.all()]
 
 
-async def set_competitive(guild_id: int, names: list[str]) -> tuple[list[str], list[str]]:
+async def set_competitive(
+    guild_id: int, names: list[str], actor_id: int | None = None
+) -> tuple[list[str], list[str]]:
     """Make the competitive pool exactly `names` (case-insensitive).
 
     Maps put in the pool are enabled too — an admin marking a map competitive
@@ -70,7 +73,10 @@ async def set_competitive(guild_id: int, names: list[str]) -> tuple[list[str], l
                 in_pool.append(m.name)
                 seen.add(m.name.lower())
         await s.commit()
-    return sorted(in_pool), sorted(wanted - seen)
+    in_pool, unknown = sorted(in_pool), sorted(wanted - seen)
+    if actor_id is not None:
+        await audit.log(guild_id, actor_id, "maps_competitive", meta=",".join(in_pool))
+    return in_pool, unknown
 
 
 async def seed(guild_id: int) -> list[str]:
@@ -83,3 +89,43 @@ async def seed(guild_id: int) -> list[str]:
                 added.append(name)
         await s.commit()
     return added
+
+
+async def add_map(guild_id: int, name: str, actor_id: int | None = None) -> bool:
+    """Add `name` to the pool if it isn't already there. Returns True if added."""
+    async with SessionLocal() as s:
+        if await s.get(Map, (guild_id, name)):
+            return False
+        s.add(Map(guild_id=guild_id, name=name, enabled=True))
+        await s.commit()
+    if actor_id is not None:
+        await audit.log(guild_id, actor_id, "map_add", name)
+    return True
+
+
+async def remove_map(guild_id: int, name: str, actor_id: int | None = None) -> bool:
+    """Remove `name` from the pool. Returns True if it existed."""
+    async with SessionLocal() as s:
+        m = await s.get(Map, (guild_id, name))
+        if not m:
+            return False
+        await s.delete(m)
+        await s.commit()
+    if actor_id is not None:
+        await audit.log(guild_id, actor_id, "map_remove", name)
+    return True
+
+
+async def toggle_map(guild_id: int, name: str, actor_id: int | None = None) -> bool | None:
+    """Flip `name`'s enabled state. Returns the new state, or None if `name`
+    isn't in the pool."""
+    async with SessionLocal() as s:
+        m = await s.get(Map, (guild_id, name))
+        if not m:
+            return None
+        m.enabled = not m.enabled
+        state = m.enabled
+        await s.commit()
+    if actor_id is not None:
+        await audit.log(guild_id, actor_id, "map_toggle", name, enabled=state)
+    return state

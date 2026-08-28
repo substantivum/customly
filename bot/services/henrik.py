@@ -14,11 +14,16 @@ import aiohttp
 
 from bot.config import settings
 
-log = logging.getLogger("valbot.henrik")
+log = logging.getLogger("customly.henrik")
 
 BASE = "https://api.henrikdev.xyz"
 ACCOUNT_TIMEOUT = 8.0
 MMR_TIMEOUT = 5.0
+# Transient failures (rate limit, timeout) get a couple of short retries here so
+# every caller gets the benefit — without this, protection against a stray 429
+# lived only in rank_sync's own fallback-to-cache logic, and any other caller
+# would take the failure raw.
+RETRY_BACKOFF = (0.5, 1.5)
 
 _session: aiohttp.ClientSession | None = None
 
@@ -95,7 +100,7 @@ def parse_mmr(payload: dict) -> RiotRank:
     )
 
 
-async def _get(url: str, timeout: float) -> dict:
+async def _get_once(url: str, timeout: float) -> dict:
     log.debug("GET %s", url)
     try:
         async with _get_session().get(
@@ -117,6 +122,20 @@ async def _get(url: str, timeout: float) -> dict:
     except aiohttp.ClientError as e:
         log.warning("client error on %s: %s", url, e)
         raise HenrikUnavailable(str(e)) from e
+
+
+async def _get(url: str, timeout: float) -> dict:
+    """Transient failures (rate limit, timeout) get a couple of retries with a
+    short backoff; everything else (404, other HTTP errors) fails immediately —
+    retrying those would just repeat the same outcome."""
+    delays = (*RETRY_BACKOFF, None)
+    for i, delay in enumerate(delays):
+        try:
+            return await _get_once(url, timeout)
+        except (RateLimited, HenrikTimeout):
+            if i == len(delays) - 1:
+                raise
+            await asyncio.sleep(delay)
 
 
 async def fetch_account(name: str, tag: str) -> RiotAccount:
