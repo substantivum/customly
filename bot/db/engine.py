@@ -1,13 +1,8 @@
 """Async SQLAlchemy engine + session factory. SQLite tuned with WAL."""
 from __future__ import annotations
 
-import asyncio
 import os
-import sqlite3
-from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -16,12 +11,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from bot.config import settings
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-# alembic/versions/2fe3e291e473_baseline.py — the schema as it stood the moment
-# Alembic was adopted, i.e. exactly what the old create_all-based bootstrap
-# already produces on every deployment that predates this file.
-BASELINE_REVISION = "2fe3e291e473"
+from bot.db.models import Base
 
 # Ensure the data dir exists (sqlite file lives on the mounted volume).
 # abspath() so a bare `bot.db` still yields a directory to check.
@@ -53,52 +43,55 @@ def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
     cur.close()
 
 
-def _needs_baseline_stamp() -> bool:
-    """True if the DB already has app tables but no recorded Alembic revision.
+def _literal_default(col) -> str | None:  # noqa: ANN001
+    """SQL literal for a column's Python-side default, or None if it has none.
 
-    Two ways to land here: a deployment that predates Alembic entirely (no
-    `alembic_version` table at all), or a previous `upgrade` that got partway
-    through baseline and crashed (SQLite DDL isn't transactional, so Alembic's
-    own `alembic_version` table — which it creates *before* running any
-    migration — survives a failed run even though no revision ever got
-    written to it). Either way the app tables already match baseline, so it
-    should be marked there directly rather than replaying baseline's
-    create_table calls against tables that already exist.
+    Only scalars are usable in `ALTER TABLE ... ADD COLUMN`; callables (e.g.
+    `_utcnow`) are skipped — the column is simply added nullable/empty.
     """
-    if not os.path.exists(settings.db_path):
-        return False
-    conn = sqlite3.connect(settings.db_path)
-    try:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        app_tables = tables - {"alembic_version", "sqlite_sequence"}
-        if not app_tables:
-            return False
-        if "alembic_version" not in tables:
-            return True
-        return conn.execute("SELECT 1 FROM alembic_version LIMIT 1").fetchone() is None
-    finally:
-        conn.close()
+    d = getattr(col, "default", None)
+    if d is None or getattr(d, "is_callable", False):
+        return None
+    arg = getattr(d, "arg", None)
+    if isinstance(arg, bool):
+        return "1" if arg else "0"
+    if isinstance(arg, (int, float)):
+        return str(arg)
+    if isinstance(arg, str):
+        escaped = arg.replace("'", "''")
+        return f"'{escaped}'"
+    return None
 
 
-def _run_migrations() -> None:
-    """Bring the schema up to date via Alembic (alembic/versions/).
+async def _add_missing_columns(conn) -> None:  # noqa: ANN001
+    """Poor-man's migration: add columns the models gained since the DB was made.
 
-    Runs on the plain sync sqlite3 driver, same as alembic/env.py — schema DDL
-    doesn't need asyncio, and pysqlite is stdlib. Blocking, so the caller runs
-    it off the event loop; a boot-time schema check is quick enough that a
-    dedicated migration step before start isn't needed.
+    `create_all` only creates missing *tables*, so a bot upgraded in place would
+    otherwise crash on every new column. SQLite's ADD COLUMN is cheap and
+    non-destructive; existing rows get the column default (or NULL). Doesn't
+    handle anything beyond that (renames, new constraints) — a genuinely
+    structural change still needs a hand-written one-off migration.
     """
-    cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
-
-    if _needs_baseline_stamp():
-        command.stamp(cfg, BASELINE_REVISION)
-
-    command.upgrade(cfg, "head")
+    for table in Base.metadata.sorted_tables:
+        rows = await conn.execute(text(f"PRAGMA table_info('{table.name}')"))
+        existing = {r[1] for r in rows}
+        if not existing:      # table didn't exist -> create_all just made it
+            continue
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} " \
+                  f"{col.type.compile(engine.dialect)}"
+            default = _literal_default(col)
+            if default is not None:
+                ddl += f" DEFAULT {default}"
+            await conn.execute(text(ddl))
 
 
 async def init_db() -> None:
-    """Bring the schema up to date, then apply pragmas to this connection."""
-    await asyncio.to_thread(_run_migrations)
+    """Create tables on first boot, then patch in any new columns."""
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await _add_missing_columns(conn)
+        # ensure pragmas applied on this connection too
         await conn.execute(text("PRAGMA journal_mode=WAL"))
