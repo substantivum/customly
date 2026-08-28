@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 from pathlib import Path
 
 from alembic import command
@@ -17,6 +18,10 @@ from sqlalchemy.ext.asyncio import (
 from bot.config import settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# alembic/versions/2fe3e291e473_baseline.py — the schema as it stood the moment
+# Alembic was adopted, i.e. exactly what the old create_all-based bootstrap
+# already produces on every deployment that predates this file.
+BASELINE_REVISION = "2fe3e291e473"
 
 # Ensure the data dir exists (sqlite file lives on the mounted volume).
 # abspath() so a bare `bot.db` still yields a directory to check.
@@ -48,6 +53,17 @@ def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
     cur.close()
 
 
+def _existing_tables() -> set[str]:
+    if not os.path.exists(settings.db_path):
+        return set()
+    conn = sqlite3.connect(settings.db_path)
+    try:
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        return {r[0] for r in rows}
+    finally:
+        conn.close()
+
+
 def _run_migrations() -> None:
     """Bring the schema up to date via Alembic (alembic/versions/).
 
@@ -58,6 +74,15 @@ def _run_migrations() -> None:
     """
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+
+    tables = _existing_tables()
+    if tables and "alembic_version" not in tables:
+        # A deployment that predates Alembic: the old create_all-based
+        # bootstrap already built this exact schema (baseline is a faithful
+        # snapshot of it), so mark it there directly instead of replaying
+        # baseline's create_table calls against tables that already exist.
+        command.stamp(cfg, BASELINE_REVISION)
+
     command.upgrade(cfg, "head")
 
 
