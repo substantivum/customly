@@ -185,7 +185,7 @@ class AddMapModal(LocalizedModal):
         name = self.name.value.strip()
         if not name:
             return await reply(itx, t("maps.err.empty"))
-        added = await maps_svc.add_map(itx.guild_id, name, itx.user.id)
+        added = await maps_svc.add_map(itx.guild_id, name, itx.user.id, game=self.screen.game)
         if not added:
             return await reply(itx, t("maps.err.exists", name=name))
         await self.screen.repaint()        # redraw the pool behind the modal
@@ -773,14 +773,19 @@ class MapsScreen(_Gated):
 
     LEVEL = ADMIN
 
+    # Dota 2 has no map pool, so it isn't offered here.
+    GAMES = tuple(g for g in games_svc.GAMES if games_svc.has_veto(g))
+
     def __init__(self, guild_id: int, parent: Screen | None = None):
         super().__init__(parent)
         self.guild_id = guild_id
+        self.game = "valorant"
         self._maps: list[Map] = []
 
     async def embed(self) -> discord.Embed:
-        self._maps = await maps_svc.all_maps(self.guild_id)
+        self._maps = await maps_svc.all_maps(self.guild_id, self.game)
         e = discord.Embed(title=t("board.map_pool"), color=EMBED_COLOR)
+        e.add_field(name=t("common.game"), value=games_svc.game_label(self.game), inline=False)
         if not self._maps:
             e.description = t("screen.maps.empty")
             return e
@@ -802,6 +807,25 @@ class MapsScreen(_Gated):
             self.add_item(self._Competitive(self._maps))
         self.add_item(self._Seed())
         self.add_item(self._Add())
+        self.add_item(self._Game(self.game))
+
+    class _Game(discord.ui.Select):
+        def __init__(self, current: str):
+            super().__init__(
+                placeholder=t("screen.maps.game_ph"),
+                options=[
+                    discord.SelectOption(
+                        label=games_svc.game_label(g), value=g, default=g == current,
+                    )
+                    for g in MapsScreen.GAMES
+                ],
+                row=3,
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            view: MapsScreen = self.view
+            view.game = self.values[0]
+            await view.reload(itx)
 
     class _Toggle(discord.ui.Select):
         def __init__(self, maps: list[Map]):
@@ -847,10 +871,11 @@ class MapsScreen(_Gated):
                              options=opts, min_values=0, max_values=len(opts), row=1)
 
         async def callback(self, itx: discord.Interaction):
+            view: MapsScreen = self.view
             in_pool, _ = await maps_svc.set_competitive(
-                itx.guild_id, list(self.values), itx.user.id
+                itx.guild_id, list(self.values), itx.user.id, game=view.game
             )
-            await self.view.reload(itx)
+            await view.reload(itx)
             board.schedule(itx.guild)
             await reply(
                 itx,
@@ -864,8 +889,9 @@ class MapsScreen(_Gated):
                              row=2)
 
         async def callback(self, itx: discord.Interaction):
-            added = await maps_svc.seed(itx.guild_id)
-            await self.view.reload(itx)
+            view: MapsScreen = self.view
+            added = await maps_svc.seed(itx.guild_id, view.game)
+            await view.reload(itx)
             board.schedule(itx.guild)
             await reply(itx, t("maps.seeded", n=len(added)) if added
                         else t("maps.already_seeded"))

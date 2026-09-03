@@ -410,6 +410,7 @@ STRINGS: dict[str, str] = {
     "screen.maps.footer": "Ticking a map competitive enables it for play.",
     "screen.maps.toggle_ph": "Toggle maps on/off (pick as many as you like)…",
     "screen.maps.comp_ph": "Competitive pool — tick the current rotation…",
+    "screen.maps.game_ph": "Game — which pool you're editing…",
     "screen.maps.in_comp": "in the competitive pool",
     "screen.maps.flipped": "**{name}** → {state}",
     "screen.maps.nothing": "Nothing to toggle.",

@@ -398,6 +398,7 @@ STRINGS: dict[str, str] = {
     "screen.maps.footer": "Отметка карты соревновательной автоматически включает её.",
     "screen.maps.toggle_ph": "Включить/выключить карты (можно несколько)…",
     "screen.maps.comp_ph": "Соревновательный пул — отметьте текущую ротацию…",
+    "screen.maps.game_ph": "Игра — какой пул вы редактируете…",
     "screen.maps.in_comp": "в соревновательном пуле",
     "screen.maps.flipped": "**{name}** → {state}",
     "screen.maps.nothing": "Нечего переключать.",
