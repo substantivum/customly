@@ -89,6 +89,7 @@ STRINGS: dict[str, str] = {
     "btn.revoke": "Revoke",
     "btn.set_code": "Set party code",
     "btn.set_code.cs2": "Set lobby IP",
+    "btn.set_code.dota2": "Set lobby info",
     "btn.end_custom": "End custom",
     "btn.ready": "Ready",
     "btn.cant_play": "Can't play",
@@ -125,6 +126,7 @@ STRINGS: dict[str, str] = {
     "error.no_channel": "This custom has no channel left to run the match in.",
     "error.no_match_yet": "That custom hasn't started a match yet.",
     "error.code_charset": "Code must be alphanumeric (`-`, `_`, `.` and `:` allowed).",
+    "error.lobby_name_required": "Lobby name can't be empty.",
     "error.already_ended": "This custom is already ended.",
     "error.not_started": "This custom hasn't started yet — delete it instead.",
     "error.match_not_found": "Match not found.",
@@ -653,6 +655,8 @@ STRINGS: dict[str, str] = {
     "lobby.team_cap": "{team} (cap {captain})",
     "lobby.party_code": "Party Code",
     "lobby.party_code.cs2": "Lobby IP",
+    "lobby.lobby_name": "Lobby Name",
+    "lobby.lobby_password": "Lobby Password",
     "lobby.voice": "Voice",
     "lobby.map_line": "**{index}. {map}** — Team A {side_a} · Team B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
@@ -662,6 +666,7 @@ STRINGS: dict[str, str] = {
     ),
     "code.updated": "Party code updated.",
     "code.updated.cs2": "Lobby IP updated.",
+    "code.updated.dota2": "Lobby info updated.",
     "modal.create.title": "Create custom",
     "modal.create.name": "Name",
     "modal.create.name_ph": "Friday 5v5",
@@ -680,13 +685,24 @@ STRINGS: dict[str, str] = {
     "modal.code.title.cs2": "Lobby IP",
     "modal.code.label.cs2": "Server IP",
     "modal.code.ph.cs2": "203.0.113.10:27015",
+    "modal.code.title.dota2": "Dota 2 Lobby",
+    "modal.code.name_label": "Lobby name",
+    "modal.code.name_ph": "Friday Custom",
+    "modal.code.password_label": "Password (optional)",
+    "modal.code.password_ph": "leave blank for none",
     "modal.result.title": "Match result",
-    "modal.result.map": "{index}. {map}",
+    "modal.result.map": "{index}. {map}: {cap_a} vs {cap_b}",
     "modal.result.ph": "13-11 — leave blank if not played",
+    "modal.result.score_ph": "e.g. 13",
     "code.set": "Party code for Custom #{custom_id} set.",
     "code.set.cs2": "Lobby IP for Custom #{custom_id} set.",
+    "code.set.dota2": "Lobby info for Custom #{custom_id} set.",
     "code.announced": "**Party Code — Custom #{custom_id}:** `{code}`  (set by {actor})",
     "code.announced.cs2": "**Lobby IP — Custom #{custom_id}:** `{code}`  (set by {actor})",
+    "code.announced.dota2": (
+        "**Lobby — Custom #{custom_id}:** Name: `{name}` · Password: `{password}`  "
+        "(set by {actor})"
+    ),
 
     # ------------------------------------------------------------- profile ---
     "profile.register.pending": (
@@ -785,10 +801,12 @@ STRINGS: dict[str, str] = {
     "cmd.match.readycheck.custom_id": "Custom to run the check on",
     "cmd.match.result.desc": "Report a map result (captain or admin).",
     "cmd.match.partycode.desc": (
-        "Set/update the party code or server IP (any registered player). Shown to everyone."
+        "Set/update the party code, server IP or lobby name (any registered "
+        "player). Shown to everyone."
     ),
     "cmd.match.partycode.custom_id": "Custom whose match this is",
-    "cmd.match.partycode.code": "Party/group code, or server IP for CS2",
+    "cmd.match.partycode.code": "Party/group code, server IP for CS2, or lobby name for Dota 2",
+    "cmd.match.partycode.password": "(Dota 2 only) lobby password",
     "cmd.match.end.desc": "End the match: mark it done and delete its voice + text channels.",
     "cmd.match.end.custom_id": "Custom whose match to end",
     "cmd.match.end.force": "End it even though nobody reported the result (admin)",

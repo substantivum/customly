@@ -461,7 +461,11 @@ async def _run_draft(guild, channel, custom, match_id, cap_a, cap_b, pool, first
         else:
             await _finish_without_veto(guild, channel, custom, match_id, draft, cap_a, cap_b)
 
-    if draft.done:                      # 1v1: nothing to draft
+    # A pool of exactly one player isn't a real choice — resolve it before ever
+    # showing a one-option Select and making a captain click it.
+    await draft.resolve_forced_picks()
+
+    if draft.done:                      # 1v1 (or the pool just auto-resolved)
         await draft.persist_teams()
         await channel.send(embed=draft.embed())
         await after_draft()
@@ -610,11 +614,23 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
             value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or DASH,
             inline=False,
         )
-    e.add_field(
-        name=games_svc.code_text("label", c.game),
-        value=f"`{m.party_code}`" if m and m.party_code else DASH,
-        inline=True,
-    )
+    if games_svc.uses_name_password(c.game):
+        e.add_field(
+            name=games_svc.code_text("embed_name", c.game),
+            value=f"`{m.lobby_name}`" if m and m.lobby_name else DASH,
+            inline=True,
+        )
+        e.add_field(
+            name=games_svc.code_text("embed_password", c.game),
+            value=f"`{m.lobby_password}`" if m and m.lobby_password else DASH,
+            inline=True,
+        )
+    else:
+        e.add_field(
+            name=games_svc.code_text("label", c.game),
+            value=f"`{m.party_code}`" if m and m.party_code else DASH,
+            inline=True,
+        )
     vcs = " / ".join(x.mention for x in voice.team_vcs(guild, c) if x)
     if vcs:
         e.add_field(name=t("lobby.voice"), value=vcs, inline=True)
@@ -1035,6 +1051,16 @@ async def is_match_captain(match_id: int, user_id: int) -> bool:
         return user_id in {r[0] for r in rows.all()}
 
 
+async def match_captains(match_id: int) -> dict[str, int | None]:
+    """`{"A": user_id, "B": user_id}` for a match — used to name captains
+    instead of bare "Team A"/"Team B" wherever the result is reported."""
+    async with SessionLocal() as s:
+        rows = await s.execute(
+            select(MatchTeam).where(MatchTeam.match_id == match_id)
+        )
+        return {team.side: team.captain_id for (team,) in rows.all()}
+
+
 async def _can_run_custom(custom_id: int, member: discord.Member) -> bool:
     """Captain of the custom's match, or owner/admin of the custom's guild."""
     async with SessionLocal() as s:
@@ -1098,6 +1124,47 @@ async def set_party_code(
     if announce and chan:
         await chan.send(games_svc.code_text(
             "announced", game, custom_id=custom_id, code=code, actor=itx.user.mention,
+        ))
+    await audit.log(itx.guild_id, itx.user.id, "party_code", str(custom_id))
+    return game
+
+
+def _sanitize_lobby_text(raw: str, max_len: int) -> str:
+    """Trim what's echoed into a public code span — strip backticks/newlines
+    (which would break out of it) but otherwise leave a lobby name/password's
+    spaces and punctuation alone, unlike the stricter code/IP charset above."""
+    return raw.strip().replace("`", "").replace("\n", " ")[:max_len]
+
+
+async def set_lobby_info(
+    itx: discord.Interaction, custom_id: int, name: str, password: str,
+    announce: bool = True,
+) -> str:
+    """Dota 2's equivalent of set_party_code: a lobby name + password instead
+    of a single code, for games where bot.services.games.uses_name_password
+    is true. Returns the custom's game, same as set_party_code."""
+    if not await can_play_custom(custom_id, itx.user):
+        raise BotError(t("error.code_perm"))
+    match = await active_match_for_custom(custom_id)
+    if not match:
+        raise BotError(t("error.no_match_yet"))
+    name = _sanitize_lobby_text(name, 64)
+    password = _sanitize_lobby_text(password, 32)
+    if not name:
+        raise BotError(t("error.lobby_name_required"))
+    async with SessionLocal() as s:
+        m = await s.get(Match, match.match_id)
+        m.lobby_name = name
+        m.lobby_password = password
+        c = await s.get(Custom, custom_id)
+        chan_id = c.reg_channel
+        game = c.game
+        await s.commit()
+    chan = itx.guild.get_channel(chan_id) if chan_id else None
+    if announce and chan:
+        await chan.send(games_svc.code_text(
+            "announced", game, custom_id=custom_id, name=name, password=password or DASH,
+            actor=itx.user.mention,
         ))
     await audit.log(itx.guild_id, itx.user.id, "party_code", str(custom_id))
     return game

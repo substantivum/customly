@@ -82,6 +82,7 @@ STRINGS: dict[str, str] = {
     "btn.revoke": "Снять",
     "btn.set_code": "Задать код лобби",
     "btn.set_code.cs2": "Задать IP лобби",
+    "btn.set_code.dota2": "Задать данные лобби",
     "btn.end_custom": "Завершить кастом",
     "btn.ready": "Готов",
     "btn.cant_play": "Не могу играть",
@@ -118,6 +119,7 @@ STRINGS: dict[str, str] = {
     "error.no_channel": "У кастома не осталось канала, чтобы провести матч.",
     "error.no_match_yet": "В этом кастоме матч ещё не начался.",
     "error.code_charset": "Код должен быть буквенно-цифровым (можно `-`, `_`, `.` и `:`).",
+    "error.lobby_name_required": "Название лобби не может быть пустым.",
     "error.already_ended": "Этот кастом уже завершён.",
     "error.not_started": "Кастом ещё не начался — удалите его вместо завершения.",
     "error.match_not_found": "Матч не найден.",
@@ -640,6 +642,8 @@ STRINGS: dict[str, str] = {
     "lobby.team_cap": "{team} (кап. {captain})",
     "lobby.party_code": "Код лобби",
     "lobby.party_code.cs2": "IP лобби",
+    "lobby.lobby_name": "Название лобби",
+    "lobby.lobby_password": "Пароль лобби",
     "lobby.voice": "Голосовые каналы",
     "lobby.map_line": "**{index}. {map}** — Команда A {side_a} · Команда B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
@@ -649,6 +653,7 @@ STRINGS: dict[str, str] = {
     ),
     "code.updated": "Код лобби обновлён.",
     "code.updated.cs2": "IP лобби обновлён.",
+    "code.updated.dota2": "Данные лобби обновлены.",
     "modal.create.title": "Создать кастом",
     "modal.create.name": "Название",
     "modal.create.name_ph": "Пятничный 5x5",
@@ -667,13 +672,24 @@ STRINGS: dict[str, str] = {
     "modal.code.title.cs2": "IP лобби",
     "modal.code.label.cs2": "IP сервера",
     "modal.code.ph.cs2": "203.0.113.10:27015",
+    "modal.code.title.dota2": "Лобби Dota 2",
+    "modal.code.name_label": "Название лобби",
+    "modal.code.name_ph": "Пятничный кастом",
+    "modal.code.password_label": "Пароль (необязательно)",
+    "modal.code.password_ph": "оставьте пустым, если без пароля",
     "modal.result.title": "Результат матча",
-    "modal.result.map": "{index}. {map}",
+    "modal.result.map": "{index}. {map}: {cap_a} vs {cap_b}",
     "modal.result.ph": "13-11 — пусто, если не играли",
+    "modal.result.score_ph": "напр. 13",
     "code.set": "Код лобби для кастома #{custom_id} задан.",
     "code.set.cs2": "IP лобби для кастома #{custom_id} задан.",
+    "code.set.dota2": "Данные лобби для кастома #{custom_id} заданы.",
     "code.announced": "**Код лобби — кастом #{custom_id}:** `{code}`  (задал {actor})",
     "code.announced.cs2": "**IP лобби — кастом #{custom_id}:** `{code}`  (задал {actor})",
+    "code.announced.dota2": (
+        "**Лобби — кастом #{custom_id}:** Название: `{name}` · Пароль: `{password}`  "
+        "(задал {actor})"
+    ),
 
     # ------------------------------------------------------------ профиль ---
     "profile.register.pending": (
@@ -764,9 +780,12 @@ STRINGS: dict[str, str] = {
     "cmd.match.readycheck.desc": "Проверка готовности: каждый из основы должен подтвердить.",
     "cmd.match.readycheck.custom_id": "Кастом для проверки",
     "cmd.match.result.desc": "Внести результат карты (капитан или админ).",
-    "cmd.match.partycode.desc": "Задать/обновить код лобби или IP сервера (любой участник). Виден всем.",
+    "cmd.match.partycode.desc": (
+        "Задать/обновить код лобби, IP сервера или название лобби (любой участник). Виден всем."
+    ),
     "cmd.match.partycode.custom_id": "Кастом, к матчу которого это относится",
-    "cmd.match.partycode.code": "Код лобби/группы, или IP сервера для CS2",
+    "cmd.match.partycode.code": "Код лобби/группы, IP сервера для CS2, или название лобби для Dota 2",
+    "cmd.match.partycode.password": "(только Dota 2) пароль лобби",
     "cmd.match.end.desc": "Завершить матч: отметить готовым и удалить его каналы.",
     "cmd.match.end.custom_id": "Кастом, матч которого завершить",
     "cmd.match.end.force": "Завершить, даже если результат никто не внёс (админ)",

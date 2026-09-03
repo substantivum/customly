@@ -289,6 +289,17 @@ class DraftController:
         """Random remaining player — used when a captain's timer runs out."""
         return random.choice(self.pool)
 
+    async def resolve_forced_picks(self) -> bool:
+        """Auto-resolve a pool that's down to exactly one player.
+
+        With one name left there's nothing to actually choose — so nobody
+        should have to click it, or sit through a turn timer to get there.
+        Runs at most once: a single pick always empties a one-player pool.
+        """
+        while not self.done and len(self.pool) == 1:
+            await self.pick(self.pool[0], auto=True)
+        return self.done
+
     async def persist_teams(self) -> None:
         """Write the two MatchTeam rows (with captains) and stamp each player's
         side/team. Idempotent — the draft can finish via a click or the timer."""

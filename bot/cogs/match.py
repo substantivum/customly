@@ -124,9 +124,16 @@ class MatchCog(commands.GroupCog, name="match"):
 
     @app_commands.command(description=L("cmd.match.partycode.desc"))
     @app_commands.describe(custom_id=L("cmd.match.partycode.custom_id"),
-                           code=L("cmd.match.partycode.code"))
-    async def partycode(self, itx: discord.Interaction, custom_id: int, code: str):
-        game = await actions.set_party_code(itx, custom_id, code)
+                           code=L("cmd.match.partycode.code"),
+                           password=L("cmd.match.partycode.password"))
+    async def partycode(self, itx: discord.Interaction, custom_id: int, code: str,
+                        password: str = ""):
+        match = await actions.active_match_for_custom(custom_id)
+        if match and games_svc.uses_name_password(match.game):
+            # Dota 2: `code` doubles as the lobby name, `password` its password.
+            game = await actions.set_lobby_info(itx, custom_id, code, password)
+        else:
+            game = await actions.set_party_code(itx, custom_id, code)
         await reply(itx, games_svc.code_text("set", game, custom_id=custom_id))
 
     @app_commands.command(description=L("cmd.match.end.desc"))

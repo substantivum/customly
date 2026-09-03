@@ -35,8 +35,11 @@ FORMATS = {
     "cs2": ("BO1",),
 }
 
-# What the lobby's "how to connect" field is called. Valorant/Dota 2 share a
-# party/lobby code; CS2 connects by server IP instead.
+# Dota 2 connects by lobby name + password rather than a single code/IP.
+USES_NAME_PASSWORD = {"dota2": True}
+
+# What the lobby's "how to connect" field is called. Valorant uses a party
+# code; CS2 connects by server IP; Dota 2 by a lobby name + password.
 _CODE_KEY_OVERRIDES: dict[str, dict[str, str]] = {
     "cs2": {
         "label": "lobby.party_code.cs2",
@@ -48,6 +51,13 @@ _CODE_KEY_OVERRIDES: dict[str, dict[str, str]] = {
         "set": "code.set.cs2",
         "announced": "code.announced.cs2",
     },
+    "dota2": {
+        "button": "btn.set_code.dota2",
+        "modal_title": "modal.code.title.dota2",
+        "updated": "code.updated.dota2",
+        "set": "code.set.dota2",
+        "announced": "code.announced.dota2",
+    },
 }
 _CODE_DEFAULT_KEYS = {
     "label": "lobby.party_code",
@@ -58,6 +68,14 @@ _CODE_DEFAULT_KEYS = {
     "updated": "code.updated",
     "set": "code.set",
     "announced": "code.announced",
+    # Dota 2 only (see uses_name_password) — no per-game override needed since
+    # it's the only game that ever asks for these.
+    "modal_name_label": "modal.code.name_label",
+    "modal_name_ph": "modal.code.name_ph",
+    "modal_password_label": "modal.code.password_label",
+    "modal_password_ph": "modal.code.password_ph",
+    "embed_name": "lobby.lobby_name",
+    "embed_password": "lobby.lobby_password",
 }
 
 
@@ -86,9 +104,12 @@ def side_button_key(choice: str) -> str:
     return "btn.attack" if choice == "attack" else "btn.defence"
 
 
+def uses_name_password(game: str) -> bool:
+    return USES_NAME_PASSWORD.get(game, False)
+
+
 def code_text(kind: str, game: str, **kwargs) -> str:
-    """A party-code/lobby-IP string, worded for `game`. `kind` is one of the
-    keys in _CODE_DEFAULT_KEYS (label, button, modal_title, modal_label,
-    modal_placeholder, updated, set, announced)."""
+    """A party-code/lobby-IP/lobby-name-and-password string, worded for
+    `game`. `kind` is one of the keys in _CODE_DEFAULT_KEYS."""
     key = _CODE_KEY_OVERRIDES.get(game, {}).get(kind, _CODE_DEFAULT_KEYS[kind])
     return t(key, **kwargs)

@@ -24,6 +24,7 @@ from bot.core.controllers import (
     ReadyCheckController,
     VetoController,
 )
+from bot.core.embeds import member_name
 from bot.core.errors import BotError
 from bot.i18n import current_lang, lang_context, t
 from bot.i18n.ui import LocalizedModal, LocalizedView, bind
@@ -107,8 +108,8 @@ def registration_view(custom_id: int) -> discord.ui.View:
 
 # ------------------------------------------------------------ match lobby ---
 class PartyCodeModal(LocalizedModal):
-    """Set the code (or, for CS2, the server IP), then redraw the lobby
-    message the button lives on."""
+    """Set the code (CS2: the server IP; Dota 2: a lobby name + password),
+    then redraw the lobby message the button lives on."""
 
     def __init__(self, custom_id: int, message: discord.Message | None = None,
                  game: str = "valorant"):
@@ -116,12 +117,27 @@ class PartyCodeModal(LocalizedModal):
         self.cid = custom_id
         self.message = message
         self.game = game
-        self.code = discord.ui.TextInput(
-            label=games_svc.code_text("modal_label", game),
-            placeholder=games_svc.code_text("modal_placeholder", game),
-            max_length=32,
-        )
-        self.add_item(self.code)
+        self.name_password = games_svc.uses_name_password(game)
+        if self.name_password:
+            self.lobby_name = discord.ui.TextInput(
+                label=games_svc.code_text("modal_name_label", game),
+                placeholder=games_svc.code_text("modal_name_ph", game),
+                max_length=64,
+            )
+            self.lobby_password = discord.ui.TextInput(
+                label=games_svc.code_text("modal_password_label", game),
+                placeholder=games_svc.code_text("modal_password_ph", game),
+                max_length=32, required=False,
+            )
+            self.add_item(self.lobby_name)
+            self.add_item(self.lobby_password)
+        else:
+            self.code = discord.ui.TextInput(
+                label=games_svc.code_text("modal_label", game),
+                placeholder=games_svc.code_text("modal_placeholder", game),
+                max_length=32,
+            )
+            self.add_item(self.code)
 
     async def on_submit(self, itx: discord.Interaction):
         from bot.core import actions
@@ -129,7 +145,13 @@ class PartyCodeModal(LocalizedModal):
         await itx.response.defer(ephemeral=True)
         try:
             # announce=False: the lobby embed below is the announcement
-            game = await actions.set_party_code(itx, self.cid, self.code.value, announce=False)
+            if self.name_password:
+                game = await actions.set_lobby_info(
+                    itx, self.cid, self.lobby_name.value, self.lobby_password.value,
+                    announce=False,
+                )
+            else:
+                game = await actions.set_party_code(itx, self.cid, self.code.value, announce=False)
         except BotError as e:
             return await itx.followup.send(str(e), ephemeral=True)
         if self.message:
@@ -187,6 +209,12 @@ class MatchResultModal(LocalizedModal):
     with it — so the scores are collected here rather than left to a
     `/match result` nobody remembers to run.
 
+    A BO1 gets one field per captain — their name right on the label, so
+    there's no doubt whose score is whose. A BO3/BO5 series still needs one
+    field per map (Discord caps a modal at 5 inputs, and two per map would
+    outgrow that), so those fields carry both captains' names in the label
+    instead and keep the combined "13-11" value.
+
     `after` is awaited with this modal's own interaction once the custom is
     gone, for a caller (the staff panel) whose message has to be redrawn.
     """
@@ -198,6 +226,8 @@ class MatchResultModal(LocalizedModal):
         maps: list[str],
         reported: dict[str, str] | None = None,
         *,
+        cap_a_name: str = "Team A",
+        cap_b_name: str = "Team B",
         after=None,
     ):
         super().__init__(title=t("modal.result.title"))
@@ -205,28 +235,53 @@ class MatchResultModal(LocalizedModal):
         self.match_id = match_id
         self.after = after
         self.fields: list[tuple[str, discord.ui.TextInput]] = []
+        self.bo1_map: str | None = None
         reported = reported or {}
-        # Discord allows five inputs per modal and a BO5 plays five maps, so the
-        # longest series this bot runs fits exactly.
-        for i, name in enumerate(maps[:5], start=1):
-            field = discord.ui.TextInput(
-                label=t("modal.result.map", index=i, map=name)[:45],
-                placeholder=t("modal.result.ph"),
-                default=reported.get(name),
-                required=False,
-                max_length=16,
+        if len(maps) == 1:
+            # One map, two inputs — a real choice of layout since it fits
+            # Discord's cap, and it's the clearest possible reading: the
+            # label IS the captain, so there's nothing to misread.
+            self.bo1_map = maps[0]
+            prev_a, prev_b = "", ""
+            prev = reported.get(self.bo1_map)
+            if prev and "-" in prev:
+                prev_a, prev_b = prev.split("-", 1)
+            self.score_a = discord.ui.TextInput(
+                label=cap_a_name[:45], placeholder=t("modal.result.score_ph"),
+                default=prev_a or None, required=False, max_length=4,
             )
-            self.add_item(field)
-            self.fields.append((name, field))
+            self.score_b = discord.ui.TextInput(
+                label=cap_b_name[:45], placeholder=t("modal.result.score_ph"),
+                default=prev_b or None, required=False, max_length=4,
+            )
+            self.add_item(self.score_a)
+            self.add_item(self.score_b)
+        else:
+            # Discord allows five inputs per modal and a BO5 plays five maps,
+            # so the longest series this bot runs fits exactly.
+            for i, name in enumerate(maps[:5], start=1):
+                field = discord.ui.TextInput(
+                    label=t("modal.result.map", index=i, map=name,
+                            cap_a=cap_a_name, cap_b=cap_b_name)[:45],
+                    placeholder=t("modal.result.ph"),
+                    default=reported.get(name),
+                    required=False,
+                    max_length=16,
+                )
+                self.add_item(field)
+                self.fields.append((name, field))
 
     async def on_submit(self, itx: discord.Interaction):
         from bot.core import actions
         from bot.services import draft as draft_svc
 
+        if self.bo1_map is not None:
+            a, b = self.score_a.value.strip(), self.score_b.value.strip()
+            entries = [(self.bo1_map, f"{a}-{b}" if a or b else "")]
+        else:
+            entries = [(name, field.value or "") for name, field in self.fields]
         try:
-            rows = draft_svc.parse_series(
-                [(name, field.value or "") for name, field in self.fields]
-            )
+            rows = draft_svc.parse_series(entries)
         except BotError as e:
             # A typo shouldn't cost them the custom: the modal is answered with
             # what's wrong and the lobby is left standing to try again.
@@ -292,8 +347,13 @@ class EndCustomButton(
                 return await itx.response.send_message(
                     t("error.result_perm_end"), ephemeral=True
                 )
+            caps = await actions.match_captains(match_id)
             return await itx.response.send_modal(
-                MatchResultModal(self.cid, match_id, maps, reported)
+                MatchResultModal(
+                    self.cid, match_id, maps, reported,
+                    cap_a_name=member_name(itx.guild, caps.get("A")) if caps.get("A") else "Team A",
+                    cap_b_name=member_name(itx.guild, caps.get("B")) if caps.get("B") else "Team B",
+                )
             )
         # Nothing to report (no veto happened, or the result is already in) —
         # answer before ending, end_custom deletes the channel we're sitting in.
@@ -597,10 +657,15 @@ class DraftView(_TimedView):
         if self.c.done:
             return
         done = await self.c.pick(self.c.autopick(), auto=True)
-        self._render()
         await self._advance(done, itx=None)
 
     async def _advance(self, done: bool, *, itx):
+        # A pool of exactly one player left isn't a real choice — resolve it
+        # immediately rather than rendering a single-option Select and making
+        # the next captain click it (or wait out the turn timer) for nothing.
+        if not done:
+            done = await self.c.resolve_forced_picks()
+        self._render()
         await self._redraw(self.c.embed(), itx=itx, view=None if done else self)
         if done:
             await self._cancel()
@@ -615,11 +680,10 @@ class DraftView(_TimedView):
             super().__init__(placeholder=t("draft.pick_ph"), options=options)
 
         async def callback(self, itx: discord.Interaction):
-            view: "DraftView" = self.view  # capture before _render
+            view: "DraftView" = self.view  # capture before _advance redraws
             if itx.user.id != view.c.captain_for_turn():
                 return await itx.response.send_message(
                     t("error.not_your_pick"), ephemeral=True
                 )
             done = await view.c.pick(int(self.values[0]))
-            view._render()
             await view._advance(done, itx=itx)

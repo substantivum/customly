@@ -201,6 +201,9 @@ class Match(Base):
     format: Mapped[str] = mapped_column(String(4))
     state: Mapped[str] = mapped_column(String(16), default="created")
     party_code: Mapped[str | None] = mapped_column(String(32))  # code, or CS2's IP:port
+    # Dota 2 connects by lobby name + password instead of a single code.
+    lobby_name: Mapped[str | None] = mapped_column(String(64))
+    lobby_password: Mapped[str | None] = mapped_column(String(32))
     start_time: Mapped[datetime | None] = mapped_column()
     created_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)

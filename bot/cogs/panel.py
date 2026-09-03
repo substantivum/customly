@@ -720,8 +720,13 @@ class ManageScreen(_Gated):
             pending = await actions.pending_result(view.cid)
             if pending:
                 match_id, maps, reported = pending
+                caps = await actions.match_captains(match_id)
                 return await itx.response.send_modal(
-                    MatchResultModal(view.cid, match_id, maps, reported, after=done)
+                    MatchResultModal(
+                        view.cid, match_id, maps, reported, after=done,
+                        cap_a_name=member_name(itx.guild, caps.get("A")) if caps.get("A") else "Team A",
+                        cap_b_name=member_name(itx.guild, caps.get("B")) if caps.get("B") else "Team B",
+                    )
                 )
             # Ending deletes the custom's voice AND text channels — ack first.
             await itx.response.defer()
