@@ -107,14 +107,19 @@ def registration_view(custom_id: int) -> discord.ui.View:
 
 # ------------------------------------------------------------ match lobby ---
 class PartyCodeModal(LocalizedModal):
-    """Set the code, then redraw the lobby message the button lives on."""
+    """Set the code (or, for CS2, the server IP), then redraw the lobby
+    message the button lives on."""
 
-    def __init__(self, custom_id: int, message: discord.Message | None = None):
-        super().__init__(title=t("modal.code.title"))
+    def __init__(self, custom_id: int, message: discord.Message | None = None,
+                 game: str = "valorant"):
+        super().__init__(title=games_svc.code_text("modal_title", game))
         self.cid = custom_id
         self.message = message
+        self.game = game
         self.code = discord.ui.TextInput(
-            label=t("modal.code.label"), placeholder=t("modal.code.ph"), max_length=16
+            label=games_svc.code_text("modal_label", game),
+            placeholder=games_svc.code_text("modal_placeholder", game),
+            max_length=32,
         )
         self.add_item(self.code)
 
@@ -124,7 +129,7 @@ class PartyCodeModal(LocalizedModal):
         await itx.response.defer(ephemeral=True)
         try:
             # announce=False: the lobby embed below is the announcement
-            await actions.set_party_code(itx, self.cid, self.code.value, announce=False)
+            game = await actions.set_party_code(itx, self.cid, self.code.value, announce=False)
         except BotError as e:
             return await itx.followup.send(str(e), ephemeral=True)
         if self.message:
@@ -134,7 +139,7 @@ class PartyCodeModal(LocalizedModal):
                     await self.message.edit(embed=embed)
                 except discord.HTTPException:
                     pass
-        await itx.followup.send(t("code.updated"), ephemeral=True)
+        await itx.followup.send(games_svc.code_text("updated", game), ephemeral=True)
 
 
 class PartyCodeButton(
@@ -145,11 +150,12 @@ class PartyCodeButton(
     Discord can't hide a button per-viewer — but only players registered for
     this custom (or an admin) can actually use it."""
 
-    def __init__(self, custom_id: int):
+    def __init__(self, custom_id: int, game: str = "valorant"):
         self.cid = custom_id
+        self.game = game
         super().__init__(
             discord.ui.Button(
-                label=t("btn.set_code"), style=discord.ButtonStyle.success,
+                label=games_svc.code_text("button", game), style=discord.ButtonStyle.success,
                 custom_id=f"lobby:code:{custom_id}",
             )
         )
@@ -157,7 +163,12 @@ class PartyCodeButton(
     @classmethod
     async def from_custom_id(cls, itx, item, match):  # noqa: ANN001
         await bind(itx)
-        return cls(int(match["cid"]))
+        cid = int(match["cid"])
+        from bot.db import SessionLocal
+        from bot.db.models import Custom
+        async with SessionLocal() as s:
+            c = await s.get(Custom, cid)
+        return cls(cid, c.game if c else "valorant")
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
@@ -165,7 +176,7 @@ class PartyCodeButton(
         await bind(itx)
         if not await actions.can_play_custom(self.cid, itx.user):
             return await itx.response.send_message(t("error.code_perm"), ephemeral=True)
-        await itx.response.send_modal(PartyCodeModal(self.cid, itx.message))
+        await itx.response.send_modal(PartyCodeModal(self.cid, itx.message, game=self.game))
 
 
 class MatchResultModal(LocalizedModal):
@@ -293,10 +304,10 @@ class EndCustomButton(
             await itx.followup.send(str(e), ephemeral=True)
 
 
-def lobby_view(custom_id: int) -> discord.ui.View:
+def lobby_view(custom_id: int, game: str = "valorant") -> discord.ui.View:
     """Persistent controls on the match lobby message."""
     v = LocalizedView(timeout=None)
-    v.add_item(PartyCodeButton(custom_id))
+    v.add_item(PartyCodeButton(custom_id, game))
     v.add_item(EndCustomButton(custom_id))
     return v
 
@@ -493,8 +504,8 @@ class VetoView(_TimedView):
         self.clear_items()
         cur = self.c.current
         if cur is not None and cur.action == "side":
-            self.add_item(self._SideButton(games_svc.side_button_key(self.c.game, "attack"), "attack"))
-            self.add_item(self._SideButton(games_svc.side_button_key(self.c.game, "defence"), "defence"))
+            self.add_item(self._SideButton(games_svc.side_button_key("attack"), "attack"))
+            self.add_item(self._SideButton(games_svc.side_button_key("defence"), "defence"))
             return
         for m in self.c.remaining:
             self.add_item(self._MapButton(m))

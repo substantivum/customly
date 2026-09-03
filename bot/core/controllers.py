@@ -349,7 +349,7 @@ class VetoController:
         self.guild = guild
         self.game = game
         self.remaining = list(pool)
-        self.plan = veto_svc.veto_plan(fmt, len(pool))
+        self.plan = veto_svc.veto_plan(fmt, len(pool), with_side=games_svc.has_side_choice(game))
         self.step = 0
         self.picked_maps: list[str] = []
         # (action, side, map, choice) — choice is set on side steps only
@@ -441,9 +441,9 @@ class VetoController:
             "veto.side_text",
             map=map_name,
             chooser=chooser,
-            choice=games_svc.side_label(self.game, choice),
+            choice=games_svc.side_label(choice),
             other=other_side(chooser),
-            flip=games_svc.side_label(self.game, other_choice(choice)),
+            flip=games_svc.side_label(other_choice(choice)),
         )
 
     async def persist(self) -> None:

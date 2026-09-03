@@ -74,25 +74,30 @@ def check_pool(fmt: str, pool_size: int) -> None:
         raise BotError(t("error.veto_pool_max", fmt=fmt, max=POOL_MAX[fmt], n=pool_size))
 
 
-def veto_plan(fmt: str, pool_size: int) -> list[VetoStep]:
-    """The ordered ban/pick/side plan. The last map standing is the decider."""
+def veto_plan(fmt: str, pool_size: int, with_side: bool = True) -> list[VetoStep]:
+    """The ordered ban/pick(/side) plan. The last map standing is the decider.
+
+    `with_side` only affects BO1 — BO3/BO5 are the official sequences and
+    always carry their side steps. A game whose side is decided in-game (e.g.
+    CS2's knife round) passes `with_side=False` to end the plan at the
+    decider, with nobody asked to pick a side at all.
+    """
     check_pool(fmt, pool_size)
     if fmt in _SEQUENCES:
         return [VetoStep(action, side) for action, side in _SEQUENCES[fmt]]
-    return _bo1_plan(pool_size)
+    return _bo1_plan(pool_size, with_side)
 
 
-def _bo1_plan(pool_size: int) -> list[VetoStep]:
-    """Alternate bans from Team A down to one map, whose side then goes to the
-    team that didn't ban last."""
+def _bo1_plan(pool_size: int, with_side: bool = True) -> list[VetoStep]:
+    """Alternate bans from Team A down to one map. With `with_side`, its side
+    then goes to the team that didn't ban last."""
     bans = [
         VetoStep("ban", "A" if i % 2 == 0 else "B") for i in range(pool_size - 1)
     ]
-    return [
-        *bans,
-        VetoStep("decider", None),
-        VetoStep("side", _other(bans[-1].side)),
-    ]
+    plan = [*bans, VetoStep("decider", None)]
+    if with_side:
+        plan.append(VetoStep("side", _other(bans[-1].side)))
+    return plan
 
 
 def _other(side: str) -> str:

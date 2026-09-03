@@ -644,13 +644,18 @@ def test_valorant_keeps_its_existing_formats():
     assert allowed_formats("valorant") == ("BO1", "BO3", "BO5")
 
 
-def test_side_labels_are_t_ct_only_for_cs2():
+def test_side_labels_are_generic_now_that_only_valorant_uses_them():
     from bot.services.games import side_label
 
-    assert side_label("valorant", "attack") == "attack"
-    assert side_label("valorant", "defence") == "defence"
-    assert side_label("cs2", "attack") == "T"
-    assert side_label("cs2", "defence") == "CT"
+    assert side_label("attack") == "attack"
+    assert side_label("defence") == "defence"
+
+
+def test_cs2_has_no_side_choice_its_knife_round_decides():
+    from bot.services.games import has_side_choice
+
+    assert has_side_choice("valorant") is True
+    assert has_side_choice("cs2") is False
 
 
 def test_cs2_pool_needs_only_two_maps_not_the_valorant_seven():
@@ -661,6 +666,17 @@ def test_cs2_pool_needs_only_two_maps_not_the_valorant_seven():
     check_pool("BO1", 2)  # does not raise
     with pytest.raises(BotError):
         check_pool("BO1", 1)
+
+
+def test_bo1_plan_ends_at_the_decider_when_side_is_not_chosen():
+    """CS2's veto: bans down to one map, then stop — no side-choice step."""
+    from bot.services.veto import veto_plan
+
+    plan = veto_plan("BO1", 4, with_side=False)
+    assert [s.action for s in plan] == ["ban", "ban", "ban", "decider"]
+
+    with_side = veto_plan("BO1", 4, with_side=True)
+    assert [s.action for s in with_side] == ["ban", "ban", "ban", "decider", "side"]
 
 
 def test_asap_customs_still_conflict_on_overlap():

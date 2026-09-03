@@ -122,8 +122,6 @@ def test_every_key_used_in_the_code_exists():
     ("coin", ["heads", "tails"]),
     ("veto", ["attack", "defence"]),
     ("veto.action", ["ban", "pick"]),
-    ("veto.side", ["t", "ct"]),
-    ("btn.side", ["t", "ct"]),
     ("game", ["valorant", "dota2", "cs2"]),
     ("lang.name", list(CATALOGS)),
     ("profile.role", ["duelist", "controller", "initiator", "sentinel", "flex"]),

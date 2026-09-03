@@ -81,13 +81,12 @@ STRINGS: dict[str, str] = {
     "btn.grant": "Выдать",
     "btn.revoke": "Снять",
     "btn.set_code": "Задать код лобби",
+    "btn.set_code.cs2": "Задать IP лобби",
     "btn.end_custom": "Завершить кастом",
     "btn.ready": "Готов",
     "btn.cant_play": "Не могу играть",
     "btn.attack": "Атака",
     "btn.defence": "Защита",
-    "btn.side.t": "T",
-    "btn.side.ct": "CT",
 
     # ------------------------------------------------------------ ошибки ---
     "error.generic": "Что-то пошло не так.",
@@ -118,7 +117,7 @@ STRINGS: dict[str, str] = {
     "error.no_queue": "У этого кастома нет очереди.",
     "error.no_channel": "У кастома не осталось канала, чтобы провести матч.",
     "error.no_match_yet": "В этом кастоме матч ещё не начался.",
-    "error.code_charset": "Код лобби должен быть буквенно-цифровым (можно `-` и `_`).",
+    "error.code_charset": "Код должен быть буквенно-цифровым (можно `-`, `_`, `.` и `:`).",
     "error.already_ended": "Этот кастом уже завершён.",
     "error.not_started": "Кастом ещё не начался — удалите его вместо завершения.",
     "error.match_not_found": "Матч не найден.",
@@ -230,6 +229,7 @@ STRINGS: dict[str, str] = {
     # ------------------------------------------------------------ кастом ---
     "custom.asap": "**СЕЙЧАС**",
     "custom.asap_full": "**СЕЙЧАС** — как только лобби будет готово",
+    "custom.reg.announce": "Регистрируйтесь на кастом **{game}** ниже!",
     "custom.reg.title": "Кастом #{custom_id} — {name}",
     "custom.reg.body": (
         "**Игра:** {game}\n"
@@ -566,8 +566,6 @@ STRINGS: dict[str, str] = {
     "veto.turn": "Ход",
     "veto.attack": "атака",
     "veto.defence": "защита",
-    "veto.side.t": "T",
-    "veto.side.ct": "CT",
     "veto.action.ban": "бан",
     "veto.action.pick": "пик",
     "veto.turn_action": "{captain} — {action}",
@@ -641,6 +639,7 @@ STRINGS: dict[str, str] = {
     "lobby.full_title": "{name} — матч #{match_id} ({fmt})",
     "lobby.team_cap": "{team} (кап. {captain})",
     "lobby.party_code": "Код лобби",
+    "lobby.party_code.cs2": "IP лобби",
     "lobby.voice": "Голосовые каналы",
     "lobby.map_line": "**{index}. {map}** — Команда A {side_a} · Команда B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
@@ -649,6 +648,7 @@ STRINGS: dict[str, str] = {
         "капитана сначала спросят результат."
     ),
     "code.updated": "Код лобби обновлён.",
+    "code.updated.cs2": "IP лобби обновлён.",
     "modal.create.title": "Создать кастом",
     "modal.create.name": "Название",
     "modal.create.name_ph": "Пятничный 5x5",
@@ -664,11 +664,16 @@ STRINGS: dict[str, str] = {
     "modal.code.title": "Код лобби",
     "modal.code.label": "Код лобби / группы",
     "modal.code.ph": "7F3K2",
+    "modal.code.title.cs2": "IP лобби",
+    "modal.code.label.cs2": "IP сервера",
+    "modal.code.ph.cs2": "203.0.113.10:27015",
     "modal.result.title": "Результат матча",
     "modal.result.map": "{index}. {map}",
     "modal.result.ph": "13-11 — пусто, если не играли",
     "code.set": "Код лобби для кастома #{custom_id} задан.",
+    "code.set.cs2": "IP лобби для кастома #{custom_id} задан.",
     "code.announced": "**Код лобби — кастом #{custom_id}:** `{code}`  (задал {actor})",
+    "code.announced.cs2": "**IP лобби — кастом #{custom_id}:** `{code}`  (задал {actor})",
 
     # ------------------------------------------------------------ профиль ---
     "profile.register.pending": (
@@ -759,9 +764,9 @@ STRINGS: dict[str, str] = {
     "cmd.match.readycheck.desc": "Проверка готовности: каждый из основы должен подтвердить.",
     "cmd.match.readycheck.custom_id": "Кастом для проверки",
     "cmd.match.result.desc": "Внести результат карты (капитан или админ).",
-    "cmd.match.partycode.desc": "Задать/обновить код лобби (любой участник). Виден всем.",
+    "cmd.match.partycode.desc": "Задать/обновить код лобби или IP сервера (любой участник). Виден всем.",
     "cmd.match.partycode.custom_id": "Кастом, к матчу которого это относится",
-    "cmd.match.partycode.code": "Код лобби/группы",
+    "cmd.match.partycode.code": "Код лобби/группы, или IP сервера для CS2",
     "cmd.match.end.desc": "Завершить матч: отметить готовым и удалить его каналы.",
     "cmd.match.end.custom_id": "Кастом, матч которого завершить",
     "cmd.match.end.force": "Завершить, даже если результат никто не внёс (админ)",

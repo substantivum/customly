@@ -88,13 +88,12 @@ STRINGS: dict[str, str] = {
     "btn.grant": "Grant",
     "btn.revoke": "Revoke",
     "btn.set_code": "Set party code",
+    "btn.set_code.cs2": "Set lobby IP",
     "btn.end_custom": "End custom",
     "btn.ready": "Ready",
     "btn.cant_play": "Can't play",
     "btn.attack": "Attack",
     "btn.defence": "Defence",
-    "btn.side.t": "T",
-    "btn.side.ct": "CT",
 
     # -------------------------------------------------------------- errors ---
     "error.generic": "Something went wrong.",
@@ -125,7 +124,7 @@ STRINGS: dict[str, str] = {
     "error.no_queue": "No queue for this custom.",
     "error.no_channel": "This custom has no channel left to run the match in.",
     "error.no_match_yet": "That custom hasn't started a match yet.",
-    "error.code_charset": "Party code must be alphanumeric (`-` and `_` allowed).",
+    "error.code_charset": "Code must be alphanumeric (`-`, `_`, `.` and `:` allowed).",
     "error.already_ended": "This custom is already ended.",
     "error.not_started": "This custom hasn't started yet — delete it instead.",
     "error.match_not_found": "Match not found.",
@@ -242,6 +241,7 @@ STRINGS: dict[str, str] = {
     # ------------------------------------------------------------- custom ---
     "custom.asap": "**ASAP**",
     "custom.asap_full": "**ASAP** — as soon as the lobby is ready",
+    "custom.reg.announce": "Register for the **{game}** custom below!",
     "custom.reg.title": "Custom #{custom_id} — {name}",
     "custom.reg.body": (
         "**Game:** {game}\n"
@@ -580,8 +580,6 @@ STRINGS: dict[str, str] = {
     "veto.turn": "Turn",
     "veto.attack": "attack",
     "veto.defence": "defence",
-    "veto.side.t": "T",
-    "veto.side.ct": "CT",
     "veto.action.ban": "ban",
     "veto.action.pick": "pick",
     "veto.turn_action": "{captain} to {action}",
@@ -654,6 +652,7 @@ STRINGS: dict[str, str] = {
     "lobby.full_title": "{name} — Match #{match_id} ({fmt})",
     "lobby.team_cap": "{team} (cap {captain})",
     "lobby.party_code": "Party Code",
+    "lobby.party_code.cs2": "Lobby IP",
     "lobby.voice": "Voice",
     "lobby.map_line": "**{index}. {map}** — Team A {side_a} · Team B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
@@ -662,6 +661,7 @@ STRINGS: dict[str, str] = {
         "captain for the result first."
     ),
     "code.updated": "Party code updated.",
+    "code.updated.cs2": "Lobby IP updated.",
     "modal.create.title": "Create custom",
     "modal.create.name": "Name",
     "modal.create.name_ph": "Friday 5v5",
@@ -677,11 +677,16 @@ STRINGS: dict[str, str] = {
     "modal.code.title": "Party code",
     "modal.code.label": "Party / group code",
     "modal.code.ph": "7F3K2",
+    "modal.code.title.cs2": "Lobby IP",
+    "modal.code.label.cs2": "Server IP",
+    "modal.code.ph.cs2": "203.0.113.10:27015",
     "modal.result.title": "Match result",
     "modal.result.map": "{index}. {map}",
     "modal.result.ph": "13-11 — leave blank if not played",
     "code.set": "Party code for Custom #{custom_id} set.",
+    "code.set.cs2": "Lobby IP for Custom #{custom_id} set.",
     "code.announced": "**Party Code — Custom #{custom_id}:** `{code}`  (set by {actor})",
+    "code.announced.cs2": "**Lobby IP — Custom #{custom_id}:** `{code}`  (set by {actor})",
 
     # ------------------------------------------------------------- profile ---
     "profile.register.pending": (
@@ -780,10 +785,10 @@ STRINGS: dict[str, str] = {
     "cmd.match.readycheck.custom_id": "Custom to run the check on",
     "cmd.match.result.desc": "Report a map result (captain or admin).",
     "cmd.match.partycode.desc": (
-        "Set/update the party code (any registered player). Shown to everyone."
+        "Set/update the party code or server IP (any registered player). Shown to everyone."
     ),
     "cmd.match.partycode.custom_id": "Custom whose match this is",
-    "cmd.match.partycode.code": "Party/group code",
+    "cmd.match.partycode.code": "Party/group code, or server IP for CS2",
     "cmd.match.end.desc": "End the match: mark it done and delete its voice + text channels.",
     "cmd.match.end.custom_id": "Custom whose match to end",
     "cmd.match.end.force": "End it even though nobody reported the result (admin)",

@@ -200,7 +200,7 @@ class Match(Base):
     game: Mapped[str] = mapped_column(String(16), default="valorant")
     format: Mapped[str] = mapped_column(String(4))
     state: Mapped[str] = mapped_column(String(16), default="created")
-    party_code: Mapped[str | None] = mapped_column(String(16))
+    party_code: Mapped[str | None] = mapped_column(String(32))  # code, or CS2's IP:port
     start_time: Mapped[datetime | None] = mapped_column()
     created_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)

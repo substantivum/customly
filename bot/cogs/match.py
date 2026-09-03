@@ -15,6 +15,7 @@ from bot.db import SessionLocal
 from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import draft as draft_svc
+from bot.services import games as games_svc
 
 # Overrides for `/match start`. The custom already carries a captain method
 # chosen at creation; these are here for the one-off ("actually, let's have X and
@@ -125,8 +126,8 @@ class MatchCog(commands.GroupCog, name="match"):
     @app_commands.describe(custom_id=L("cmd.match.partycode.custom_id"),
                            code=L("cmd.match.partycode.code"))
     async def partycode(self, itx: discord.Interaction, custom_id: int, code: str):
-        await actions.set_party_code(itx, custom_id, code)
-        await reply(itx, t("code.set", custom_id=custom_id))
+        game = await actions.set_party_code(itx, custom_id, code)
+        await reply(itx, games_svc.code_text("set", game, custom_id=custom_id))
 
     @app_commands.command(description=L("cmd.match.end.desc"))
     @app_commands.describe(custom_id=L("cmd.match.end.custom_id"),

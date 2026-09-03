@@ -218,7 +218,8 @@ async def create_custom_flow(
         await s.commit()
         await s.refresh(db_c)
     notify_role_id = await guild_svc.get_notify_role(itx.guild_id)
-    content = f"<@&{notify_role_id}>" if notify_role_id else None
+    announce = t("custom.reg.announce", game=games_svc.game_label(db_c.game))
+    content = f"<@&{notify_role_id}> {announce}" if notify_role_id else announce
     allowed_mentions = (
         discord.AllowedMentions(everyone=False, users=False,
                                  roles=[discord.Object(id=notify_role_id)])
@@ -599,8 +600,8 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
         flip = "defence" if choice == "attack" else "attack"
         return t(
             "lobby.map_line", index=i, map=name,
-            side_a=games_svc.side_label(c.game, choice if chooser == "A" else flip),
-            side_b=games_svc.side_label(c.game, choice if chooser == "B" else flip),
+            side_a=games_svc.side_label(choice if chooser == "A" else flip),
+            side_b=games_svc.side_label(choice if chooser == "B" else flip),
         )
 
     if games_svc.has_veto(c.game):
@@ -610,7 +611,7 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
             inline=False,
         )
     e.add_field(
-        name=t("lobby.party_code"),
+        name=games_svc.code_text("label", c.game),
         value=f"`{m.party_code}`" if m and m.party_code else DASH,
         inline=True,
     )
@@ -637,7 +638,7 @@ async def finish_match(guild, channel, custom, match_id):
 
     e = await build_lobby_embed(guild, custom.custom_id)
     if e:
-        await channel.send(embed=e, view=lobby_view(custom.custom_id))
+        await channel.send(embed=e, view=lobby_view(custom.custom_id, game=custom.game))
 
 
 async def begin_match(
@@ -1066,11 +1067,13 @@ async def can_play_custom(custom_id: int, member: discord.Member) -> bool:
 
 async def set_party_code(
     itx: discord.Interaction, custom_id: int, code: str, announce: bool = True
-) -> None:
-    """Any registered player (or admin) sets/updates the party code.
+) -> str:
+    """Any registered player (or admin) sets/updates the party code (or, for a
+    game like CS2, the server IP — see bot.services.games.code_text).
 
     `announce` posts it as a channel message — used by the slash command. The
     lobby button passes False because it redraws the lobby embed instead.
+    Returns the custom's game, so callers can word their own confirmation.
     """
     if not await can_play_custom(custom_id, itx.user):
         raise BotError(t("error.code_perm"))
@@ -1078,8 +1081,9 @@ async def set_party_code(
     if not match:
         raise BotError(t("error.no_match_yet"))
     # The code is echoed into a public channel inside a code span — strip the
-    # characters that would let it break out or inject markdown.
-    code = "".join(ch for ch in code.strip() if ch.isalnum() or ch in "-_")[:16]
+    # characters that would let it break out or inject markdown. `.` and `:`
+    # are kept so an IP:port (CS2) survives intact.
+    code = "".join(ch for ch in code.strip() if ch.isalnum() or ch in "-_.:")[:32]
     if not code:
         raise BotError(t("error.code_charset"))
     async with SessionLocal() as s:
@@ -1087,15 +1091,16 @@ async def set_party_code(
         m.party_code = code
         c = await s.get(Custom, custom_id)
         chan_id = c.reg_channel
+        game = c.game
         await s.commit()
     # Post the code openly (visible to everyone) in the custom channel.
     chan = itx.guild.get_channel(chan_id) if chan_id else None
     if announce and chan:
-        await chan.send(
-            t("code.announced", custom_id=custom_id, code=code,
-              actor=itx.user.mention)
-        )
+        await chan.send(games_svc.code_text(
+            "announced", game, custom_id=custom_id, code=code, actor=itx.user.mention,
+        ))
     await audit.log(itx.guild_id, itx.user.id, "party_code", str(custom_id))
+    return game
 
 
 async def played_maps(match_id: int) -> list[str]:
