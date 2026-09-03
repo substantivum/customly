@@ -12,6 +12,7 @@ STRINGS: dict[str, str] = {
     "common.seats": "Места",
     "common.players": "Игроки",
     "common.waitlist": "Лист ожидания",
+    "common.game": "Игра",
     "common.maps": "Карты",
     "common.draft": "Драфт",
     "common.captains": "Капитаны",
@@ -85,6 +86,8 @@ STRINGS: dict[str, str] = {
     "btn.cant_play": "Не могу играть",
     "btn.attack": "Атака",
     "btn.defence": "Защита",
+    "btn.side.t": "T",
+    "btn.side.ct": "CT",
 
     # ------------------------------------------------------------ ошибки ---
     "error.generic": "Что-то пошло не так.",
@@ -188,7 +191,8 @@ STRINGS: dict[str, str] = {
     ),
     "error.conflict": "Пересекается с **{name}** ({start}–{end}).",
     "error.already_registered": "Вы уже записаны.",
-    "error.format": "Формат должен быть BO1, BO3 или BO5.",
+    "error.game": "Игра должна быть одной из: {games}.",
+    "error.format_for_game": "Кастомы {game} должны использовать один из форматов: {formats}.",
     "error.team_size": "Размер команды — от 1 до 5 (от 1v1 до 5v5).",
     "error.draft_mode": "Режим драфта должен быть одним из: {modes}.",
     "error.captain_method": "Способ выбора капитанов должен быть одним из: {methods}.",
@@ -228,10 +232,19 @@ STRINGS: dict[str, str] = {
     "custom.asap_full": "**СЕЙЧАС** — как только лобби будет готово",
     "custom.reg.title": "Кастом #{custom_id} — {name}",
     "custom.reg.body": (
+        "**Игра:** {game}\n"
         "**Формат:** {fmt}  ·  **{size}v{size}**\n"
         "**Начало:** {start}\n"
         "**Интервал:** {from_time} – {to_time}\n"
         "**Пул карт:** {pool}\n"
+        "**Драфт:** {draft}\n"
+        "**Капитаны:** {captains}"
+    ),
+    "custom.reg.body_no_maps": (
+        "**Игра:** {game}\n"
+        "**Формат:** {fmt}  ·  **{size}v{size}**\n"
+        "**Начало:** {start}\n"
+        "**Интервал:** {from_time} – {to_time}\n"
         "**Драфт:** {draft}\n"
         "**Капитаны:** {captains}"
     ),
@@ -350,6 +363,11 @@ STRINGS: dict[str, str] = {
     "screen.create.pool_ph": "Пул карт — выберите 2+ карты (пусто = весь включённый пул)…",
     "screen.create.draft_ph": "Режим драфта — змейка (по умолчанию) или по одному…",
     "screen.create.captains_ph": "Капитаны — как выбираются два капитана…",
+    "screen.create.game_ph": "Игра — Valorant, Dota 2 или CS2…",
+
+    "game.valorant": "Valorant",
+    "game.dota2": "Dota 2",
+    "game.cs2": "CS2",
 
     "screen.manage_list.title": "Управление кастомами",
     "screen.manage_list.desc_all": "Все активные кастомы на сервере.",
@@ -547,6 +565,8 @@ STRINGS: dict[str, str] = {
     "veto.turn": "Ход",
     "veto.attack": "атака",
     "veto.defence": "защита",
+    "veto.side.t": "T",
+    "veto.side.ct": "CT",
     "veto.action.ban": "бан",
     "veto.action.pick": "пик",
     "veto.turn_action": "{captain} — {action}",
@@ -717,6 +737,10 @@ STRINGS: dict[str, str] = {
     "cmd.custom.create.team_size": "Игроков в команде: 1 (1v1) … 5 (5v5). По умолчанию 5.",
     "cmd.custom.create.draft": "Как драфтить игроков: змейкой или по одному. По умолчанию змейкой.",
     "cmd.custom.create.captains": "Как выбираются капитаны при старте. По умолчанию случайно.",
+    "cmd.custom.create.game": (
+        "Для какой игры этот кастом. По умолчанию Valorant. "
+        "CS2 — только BO1; в Dota 2 нет вето карт."
+    ),
     "cmd.custom.register.desc": "Записаться на кастом по id.",
     "cmd.custom.leave.desc": "Выйти из кастома по id.",
     "cmd.custom.list.desc": "Список активных кастомов.",
@@ -742,9 +766,10 @@ STRINGS: dict[str, str] = {
     "cmd.match.end.force": "Завершить, даже если результат никто не внёс (админ)",
 
     "cmd.maps.list.desc": "Показать пул карт сервера.",
-    "cmd.maps.seed.desc": "Загрузить стандартный пул Valorant.",
+    "cmd.maps.seed.desc": "Загрузить стандартный пул для игры (по умолчанию Valorant).",
     "cmd.maps.competitive.desc": "Задать соревновательный пул (админ). Пусто — очистить.",
     "cmd.maps.competitive.maps": "Карты текущей ротации через запятую — пусто, чтобы очистить",
+    "cmd.maps.game": "Пул карт какой игры. По умолчанию Valorant.",
     "cmd.maps.add.desc": "Добавить карту.",
     "cmd.maps.remove.desc": "Удалить карту.",
     "cmd.maps.toggle.desc": "Включить/выключить карту.",

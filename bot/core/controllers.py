@@ -13,6 +13,7 @@ from bot.db import SessionLocal
 from bot.db.models import DraftPick, MapVeto, MatchMapSide, MatchPlayer, MatchTeam
 from bot.i18n import t
 from bot.services import draft as draft_svc
+from bot.services import games as games_svc
 from bot.services import veto as veto_svc
 
 SIDES = ("attack", "defence")
@@ -342,10 +343,11 @@ class DraftController:
 
 class VetoController:
     def __init__(self, match_id: int, fmt: str, pool: list[str], cap_a: int, cap_b: int,
-                 guild: discord.Guild | None = None):
+                 guild: discord.Guild | None = None, game: str = "valorant"):
         self.match_id = match_id
         self.cap_a, self.cap_b = cap_a, cap_b
         self.guild = guild
+        self.game = game
         self.remaining = list(pool)
         self.plan = veto_svc.veto_plan(fmt, len(pool))
         self.step = 0
@@ -439,9 +441,9 @@ class VetoController:
             "veto.side_text",
             map=map_name,
             chooser=chooser,
-            choice=t(f"veto.{choice}"),
+            choice=games_svc.side_label(self.game, choice),
             other=other_side(chooser),
-            flip=t(f"veto.{other_choice(choice)}"),
+            flip=games_svc.side_label(self.game, other_choice(choice)),
         )
 
     async def persist(self) -> None:

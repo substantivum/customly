@@ -16,6 +16,7 @@ from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import custom as custom_svc
 from bot.services import draft as draft_svc
+from bot.services import games as games_svc
 
 
 class CustomCog(commands.GroupCog, name="custom"):
@@ -30,6 +31,7 @@ class CustomCog(commands.GroupCog, name="custom"):
         team_size=L("cmd.custom.create.team_size"),
         draft=L("cmd.custom.create.draft"),
         captains=L("cmd.custom.create.captains"),
+        game=L("cmd.custom.create.game"),
     )
     @app_commands.choices(
         draft=[
@@ -40,6 +42,10 @@ class CustomCog(commands.GroupCog, name="custom"):
             app_commands.Choice(name=L(draft_svc.CAPTAIN_METHOD_KEY[m]), value=m)
             for m in draft_svc.CREATE_METHODS
         ],
+        game=[
+            app_commands.Choice(name=L(games_svc.GAME_KEY[g]), value=g)
+            for g in games_svc.GAMES
+        ],
     )
     async def create(
         self, itx: discord.Interaction, name: str, format: str,
@@ -48,6 +54,7 @@ class CustomCog(commands.GroupCog, name="custom"):
         team_size: app_commands.Range[int, 1, 5] = 5,
         draft: app_commands.Choice[str] | None = None,
         captains: app_commands.Choice[str] | None = None,
+        game: app_commands.Choice[str] | None = None,
     ):
         if settings.custom_config_channel and itx.channel_id != settings.custom_config_channel:
             raise PermissionDenied(t("error.config_channel"))
@@ -57,6 +64,7 @@ class CustomCog(commands.GroupCog, name="custom"):
             itx, name=name, fmt=format, start_raw=start, maps_csv=maps,
             team_size=team_size, draft_mode=draft.value if draft else "snake",
             captain_method=captains.value if captains else "random",
+            game=game.value if game else "valorant",
         )
         reg = itx.guild.get_channel(c.reg_channel)
         await reply(itx, t("custom.created", custom_id=c.custom_id, size=c.team_size,

@@ -105,6 +105,13 @@ class Map(Base):
     # part of the guild's "current competitive pool" — a named subset admins keep
     # in sync with Riot's active rotation, offered as one click at custom creation
     competitive: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Which game this map belongs to — not part of the primary key (map names
+    # don't collide across games in practice), so a guild's Valorant and CS2
+    # pools just live side by side in the same table.
+    game: Mapped[str] = mapped_column(String(16), default="valorant")
+    __table_args__ = (
+        CheckConstraint("game IN ('valorant','dota2','cs2')", name="ck_map_game"),
+    )
 
 
 # ----------------------------------------------------------------- customs ---
@@ -113,6 +120,7 @@ class Custom(Base):
     custom_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id: Mapped[int] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(64))
+    game: Mapped[str] = mapped_column(String(16), default="valorant")
     format: Mapped[str] = mapped_column(String(4))           # BO1|BO3|BO5
     duration_h: Mapped[int] = mapped_column(Integer)         # 1/3/5
     team_size: Mapped[int] = mapped_column(Integer, default=5)  # players per side (2-5)
@@ -138,7 +146,10 @@ class Custom(Base):
     owner_id: Mapped[int] = mapped_column(Integer)           # transferable manager
     created_by: Mapped[int] = mapped_column(Integer)         # immutable creator
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
-    __table_args__ = (CheckConstraint("format IN ('BO1','BO3','BO5')", name="ck_custom_fmt"),)
+    __table_args__ = (
+        CheckConstraint("format IN ('BO1','BO3','BO5')", name="ck_custom_fmt"),
+        CheckConstraint("game IN ('valorant','dota2','cs2')", name="ck_custom_game"),
+    )
 
 
 class CustomRegistration(Base):
@@ -184,6 +195,9 @@ class Match(Base):
     # outlive the custom, so this can and does legitimately point at a
     # custom_id that no longer exists in `customs`.
     custom_id: Mapped[int | None] = mapped_column(Integer)
+    # Copied from Custom.game at creation — kept here too (not just on the
+    # custom) since match history is meant to outlive its custom.
+    game: Mapped[str] = mapped_column(String(16), default="valorant")
     format: Mapped[str] = mapped_column(String(4))
     state: Mapped[str] = mapped_column(String(16), default="created")
     party_code: Mapped[str | None] = mapped_column(String(16))

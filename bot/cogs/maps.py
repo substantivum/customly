@@ -14,14 +14,22 @@ from bot.services import maps as maps_svc
 # Same on/off indicators the panel's map screen uses.
 MAP_ON, MAP_OFF = "\U0001f7e2", "\U0001f534"
 
+# Dota 2 has no map pool, so it isn't offered here.
+GAME_CHOICES = [
+    app_commands.Choice(name="Valorant", value="valorant"),
+    app_commands.Choice(name="CS2", value="cs2"),
+]
+
 
 class MapsCog(commands.GroupCog, name="maps"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(description=L("cmd.maps.list.desc"))
-    async def list(self, itx: discord.Interaction):
-        maps = await maps_svc.all_maps(itx.guild_id)
+    @app_commands.describe(game=L("cmd.maps.game"))
+    @app_commands.choices(game=GAME_CHOICES)
+    async def list(self, itx: discord.Interaction, game: app_commands.Choice[str] | None = None):
+        maps = await maps_svc.all_maps(itx.guild_id, game.value if game else "valorant")
         if not maps:
             return await reply(itx, t("maps.none_configured"))
         lines = [
@@ -33,16 +41,23 @@ class MapsCog(commands.GroupCog, name="maps"):
 
     @app_commands.command(description=L("cmd.maps.seed.desc"))
     @require("admin")
-    async def seed(self, itx: discord.Interaction):
-        await maps_svc.seed(itx.guild_id)
+    @app_commands.describe(game=L("cmd.maps.game"))
+    @app_commands.choices(game=GAME_CHOICES)
+    async def seed(self, itx: discord.Interaction, game: app_commands.Choice[str] | None = None):
+        await maps_svc.seed(itx.guild_id, game.value if game else "valorant")
         await reply(itx, t("maps.seeded_ok"))
 
     @app_commands.command(description=L("cmd.maps.competitive.desc"))
     @require("admin")
-    @app_commands.describe(maps=L("cmd.maps.competitive.maps"))
-    async def competitive(self, itx: discord.Interaction, maps: str = ""):
+    @app_commands.describe(maps=L("cmd.maps.competitive.maps"), game=L("cmd.maps.game"))
+    @app_commands.choices(game=GAME_CHOICES)
+    async def competitive(
+        self, itx: discord.Interaction, maps: str = "",
+        game: app_commands.Choice[str] | None = None,
+    ):
         in_pool, unknown = await maps_svc.set_competitive(
-            itx.guild_id, maps.split(","), itx.user.id
+            itx.guild_id, maps.split(","), itx.user.id,
+            game=game.value if game else "valorant",
         )
         msg = (t("maps.comp_set", maps=", ".join(in_pool)) if in_pool
                else t("maps.comp_cleared"))
@@ -52,8 +67,12 @@ class MapsCog(commands.GroupCog, name="maps"):
 
     @app_commands.command(description=L("cmd.maps.add.desc"))
     @require("admin")
-    async def add(self, itx: discord.Interaction, name: str):
-        added = await maps_svc.add_map(itx.guild_id, name, itx.user.id)
+    @app_commands.describe(game=L("cmd.maps.game"))
+    @app_commands.choices(game=GAME_CHOICES)
+    async def add(self, itx: discord.Interaction, name: str, game: app_commands.Choice[str] | None = None):
+        added = await maps_svc.add_map(
+            itx.guild_id, name, itx.user.id, game=game.value if game else "valorant"
+        )
         await reply(itx, t("maps.added_cmd" if added else "maps.err.exists", name=name))
 
     @app_commands.command(description=L("cmd.maps.remove.desc"))

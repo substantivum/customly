@@ -14,6 +14,7 @@ from bot.core.errors import Blocked, BotError, Conflict, NotFound
 from bot.db import SessionLocal
 from bot.i18n import t
 from bot.services import draft as draft_svc
+from bot.services import games as games_svc
 from bot.services import maps as maps_svc
 from bot.services import queue_svc
 from bot.services import veto as veto_svc
@@ -53,10 +54,15 @@ async def create_custom(
     draft_mode: str = "snake",
     captain_method: str = "random",
     start_asap: bool = False,
+    game: str = "valorant",
 ) -> Custom:
+    if game not in games_svc.GAMES:
+        raise BotError(t("error.game", games=", ".join(games_svc.GAMES)))
     fmt = fmt.upper()
-    if fmt not in DURATION:
-        raise BotError(t("error.format"))
+    allowed = games_svc.allowed_formats(game)
+    if fmt not in allowed:
+        raise BotError(t("error.format_for_game", game=games_svc.game_label(game),
+                         formats=", ".join(allowed)))
     if not (MIN_TEAM <= team_size <= MAX_TEAM):
         raise BotError(t("error.team_size"))
     if draft_mode not in draft_svc.DRAFT_MODES:
@@ -68,32 +74,37 @@ async def create_custom(
             t("error.captain_method", methods=", ".join(draft_svc.CREATE_METHODS))
         )
     async with SessionLocal() as s:
-        # current enabled pool (preserve original case for fallback)
-        rows = await s.execute(
-            select(Map.name).where(Map.guild_id == guild_id, Map.enabled.is_(True))
-        )
-        enabled_names = [r[0] for r in rows.all()]
-        enabled = {n.lower() for n in enabled_names}
-        chosen = [m.strip() for m in maps if m.strip()]
-        if len(chosen) == 1 and chosen[0].lower() in maps_svc.COMPETITIVE_TOKENS:
-            # "competitive" as the whole map list means the guild's current pool
-            chosen = await maps_svc.competitive_names(guild_id)
+        chosen: list[str] = []
+        if games_svc.has_veto(game):
+            # current enabled pool (preserve original case for fallback)
+            rows = await s.execute(
+                select(Map.name).where(
+                    Map.guild_id == guild_id, Map.game == game, Map.enabled.is_(True)
+                )
+            )
+            enabled_names = [r[0] for r in rows.all()]
+            enabled = {n.lower() for n in enabled_names}
+            chosen = [m.strip() for m in maps if m.strip()]
+            if len(chosen) == 1 and chosen[0].lower() in maps_svc.COMPETITIVE_TOKENS:
+                # "competitive" as the whole map list means the guild's current pool
+                chosen = await maps_svc.competitive_names(guild_id, game)
+                if not chosen:
+                    raise BotError(t("error.no_comp_pool"))
             if not chosen:
-                raise BotError(t("error.no_comp_pool"))
-        if not chosen:
-            # No maps given → use the whole enabled (seeded) pool.
-            if not enabled_names:
-                raise BotError(t("error.no_maps_pool"))
-            chosen = list(enabled_names)
-        elif enabled:  # maps given and a pool exists → enforce membership
-            bad = [m for m in chosen if m.lower() not in enabled]
-            if bad:
-                raise BotError(t("error.maps_not_enabled", maps=", ".join(bad)))
-        veto_svc.check_pool(fmt, len(chosen))
+                # No maps given → use the whole enabled (seeded) pool.
+                if not enabled_names:
+                    raise BotError(t("error.no_maps_pool"))
+                chosen = list(enabled_names)
+            elif enabled:  # maps given and a pool exists → enforce membership
+                bad = [m for m in chosen if m.lower() not in enabled]
+                if bad:
+                    raise BotError(t("error.maps_not_enabled", maps=", ".join(bad)))
+            veto_svc.check_pool(fmt, len(chosen))
 
         c = Custom(
             guild_id=guild_id,
             name=name,
+            game=game,
             format=fmt,
             duration_h=DURATION[fmt],
             team_size=team_size,

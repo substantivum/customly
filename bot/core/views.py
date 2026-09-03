@@ -27,6 +27,7 @@ from bot.core.controllers import (
 from bot.core.errors import BotError
 from bot.i18n import current_lang, lang_context, t
 from bot.i18n.ui import LocalizedModal, LocalizedView, bind
+from bot.services import games as games_svc
 
 
 class RegisterButton(
@@ -492,8 +493,8 @@ class VetoView(_TimedView):
         self.clear_items()
         cur = self.c.current
         if cur is not None and cur.action == "side":
-            self.add_item(self._SideButton("btn.attack", "attack"))
-            self.add_item(self._SideButton("btn.defence", "defence"))
+            self.add_item(self._SideButton(games_svc.side_button_key(self.c.game, "attack"), "attack"))
+            self.add_item(self._SideButton(games_svc.side_button_key(self.c.game, "defence"), "defence"))
             return
         for m in self.c.remaining:
             self.add_item(self._MapButton(m))

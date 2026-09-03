@@ -45,6 +45,7 @@ from bot.db.models import (
 )
 from bot.i18n import t
 from bot.services import custom as custom_svc
+from bot.services import games as games_svc
 from bot.services import guild_svc
 from bot.services import draft as draft_svc
 from bot.services import queue_svc, rank_sync, voice
@@ -167,6 +168,7 @@ async def create_custom_flow(
     draft_mode: str = "snake",
     captain_method: str = "random",
     tz_offset: int | None = None,
+    game: str = "valorant",
 ) -> Custom:
     start_dt = parse_start(start_raw, tz_offset)
     c = await custom_svc.create_custom(
@@ -182,6 +184,7 @@ async def create_custom_flow(
         team_size=team_size,
         draft_mode=draft_mode,
         captain_method=captain_method,
+        game=game,
     )
     category = (
         itx.guild.get_channel(settings.customs_category_id)
@@ -450,9 +453,12 @@ async def _run_draft(guild, channel, custom, match_id, cap_a, cap_b, pool, first
     draft = DraftController(match_id, cap_a, cap_b, pool,
                             mode=custom.draft_mode, first=first_side, guild=guild)
 
-    @flow_step(channel, "the map veto")
+    @flow_step(channel, "the map veto" if games_svc.has_veto(custom.game) else "the match lobby")
     async def after_draft():
-        await _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b)
+        if games_svc.has_veto(custom.game):
+            await _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b)
+        else:
+            await _finish_without_veto(guild, channel, custom, match_id, draft, cap_a, cap_b)
 
     if draft.done:                      # 1v1: nothing to draft
         await draft.persist_teams()
@@ -465,19 +471,35 @@ async def _run_draft(guild, channel, custom, match_id, cap_a, cap_b, pool, first
     await dview.arm()  # start the per-turn auto-pick timer
 
 
-async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
-    pool = json.loads(custom.map_pool)
-    veto_ctl = VetoController(match_id, custom.format, pool, cap_a, cap_b, guild=guild)
-    ACTIVE_VETO[match_id] = veto_ctl
-    # Voice is a convenience, the veto is the match. A server that can't take two
-    # more channels (category full, missing Manage Channels) must not strand the
-    # match between the draft and the veto, so this failure is reported, not raised.
+async def _setup_team_vcs_safe(guild, channel, custom, draft, cap_a, cap_b) -> None:
+    """Voice is a convenience, the match itself is not. A server that can't take
+    two more channels (category full, missing Manage Channels) must not strand
+    the match between the draft and whatever comes next, so this failure is
+    reported, not raised."""
     try:
         await voice.setup_team_vcs(guild, custom, draft.team["A"], draft.team["B"],
                                    cap_a=cap_a, cap_b=cap_b)
     except discord.HTTPException as e:
         log.warning("team VCs for custom %s failed: %s", custom.custom_id, e)
         await channel.send(t("error.team_vcs", error=e.text or e))
+
+
+async def _finish_without_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
+    """Games with no map veto (Dota 2) go straight from the draft to live."""
+    await _setup_team_vcs_safe(guild, channel, custom, draft, cap_a, cap_b)
+    async with SessionLocal() as s:
+        m = await s.get(Match, match_id)
+        m.state = "live"
+        await s.commit()
+    await finish_match(guild, channel, custom, match_id)
+
+
+async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
+    pool = json.loads(custom.map_pool)
+    veto_ctl = VetoController(match_id, custom.format, pool, cap_a, cap_b,
+                              guild=guild, game=custom.game)
+    ACTIVE_VETO[match_id] = veto_ctl
+    await _setup_team_vcs_safe(guild, channel, custom, draft, cap_a, cap_b)
     async with SessionLocal() as s:
         m = await s.get(Match, match_id)
         m.state = "veto"
@@ -496,7 +518,7 @@ async def _run_veto(guild, channel, custom, match_id, draft, cap_a, cap_b):
                 if m:
                     m.side_map, m.side_pick, m.side_pick_side = name, choice, chooser
                     await s.commit()
-        await finish_veto(guild, channel, custom, match_id)
+        await finish_match(guild, channel, custom, match_id)
 
     view.on_done = _finish
     view.message = await channel.send(embed=veto_ctl.embed(), view=view)
@@ -577,15 +599,16 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
         flip = "defence" if choice == "attack" else "attack"
         return t(
             "lobby.map_line", index=i, map=name,
-            side_a=t(f"veto.{choice if chooser == 'A' else flip}"),
-            side_b=t(f"veto.{choice if chooser == 'B' else flip}"),
+            side_a=games_svc.side_label(c.game, choice if chooser == "A" else flip),
+            side_b=games_svc.side_label(c.game, choice if chooser == "B" else flip),
         )
 
-    e.add_field(
-        name=t("common.maps"),
-        value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or DASH,
-        inline=False,
-    )
+    if games_svc.has_veto(c.game):
+        e.add_field(
+            name=t("common.maps"),
+            value="\n".join(_map_line(i, n) for i, n in enumerate(maps, start=1)) or DASH,
+            inline=False,
+        )
     e.add_field(
         name=t("lobby.party_code"),
         value=f"`{m.party_code}`" if m and m.party_code else DASH,
@@ -599,8 +622,9 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
     return e
 
 
-async def finish_veto(guild, channel, custom, match_id):
-    """Veto done → mark the match live and post the final lobby for everyone."""
+async def finish_match(guild, channel, custom, match_id):
+    """Veto (or draft, for games with none) done → mark the match live and post
+    the final lobby for everyone."""
     from bot.core.views import lobby_view
 
     async with SessionLocal() as s:
@@ -641,10 +665,12 @@ async def begin_match(
         )
     # Check the pool before anything is created: a custom made before the format
     # got its pool rule would otherwise strand two drafted teams at the veto.
-    try:
-        veto_svc.check_pool(c.format, len(json.loads(c.map_pool)))
-    except BotError as e:
-        raise BotError(t("error.pool_recreate", reason=e))
+    # Games with no veto (Dota 2) have no pool to check.
+    if games_svc.has_veto(c.game):
+        try:
+            veto_svc.check_pool(c.format, len(json.loads(c.map_pool)))
+        except BotError as e:
+            raise BotError(t("error.pool_recreate", reason=e))
     # The method is fixed when the custom is created; `captains` overrides it
     # only where a caller genuinely needs to (e.g. `/match start captains:manual`).
     captains = captains or c.captain_method or "random"
@@ -674,7 +700,7 @@ async def begin_match(
 
     async with SessionLocal() as s:
         match = Match(guild_id=guild.id, custom_id=custom_id, format=c.format,
-                      state="captains", created_by=actor_id)
+                      game=c.game, state="captains", created_by=actor_id)
         s.add(match)
         await s.flush()
         for uid in member_ids:

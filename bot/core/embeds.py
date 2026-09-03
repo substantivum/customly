@@ -9,6 +9,7 @@ import discord
 from bot.db.models import Custom
 from bot.i18n import t
 from bot.services.draft import captain_label, draft_mode_label
+from bot.services.games import game_label, has_veto
 
 # The bot's one accent colour. Muted olive: it holds up as an embed's left bar in
 # both Discord themes, where a lighter sand washes out against the dark one.
@@ -65,22 +66,26 @@ def custom_registration_embed(
     size: int,
     waitlist: list[int] | None = None,
 ) -> discord.Embed:
-    pool = ", ".join(json.loads(custom.map_pool))
     start = as_utc(custom.start_time)
     end = start + timedelta(hours=custom.duration_h)
+    game = getattr(custom, "game", "valorant") or "valorant"
+    body_kwargs = dict(
+        game=game_label(game),
+        fmt=custom.format,
+        size=custom.team_size,
+        start=start_line(custom),
+        from_time=ts(start, "t"),
+        to_time=ts(end, "t"),
+        draft=draft_mode_label(custom.draft_mode or "snake"),
+        captains=captain_label(custom.captain_method or "random"),
+    )
+    if has_veto(game):
+        body = t("custom.reg.body", pool=", ".join(json.loads(custom.map_pool)), **body_kwargs)
+    else:
+        body = t("custom.reg.body_no_maps", **body_kwargs)
     e = discord.Embed(
         title=t("custom.reg.title", custom_id=custom.custom_id, name=custom.name),
-        description=t(
-            "custom.reg.body",
-            fmt=custom.format,
-            size=custom.team_size,
-            start=start_line(custom),
-            from_time=ts(start, "t"),
-            to_time=ts(end, "t"),
-            pool=pool,
-            draft=draft_mode_label(custom.draft_mode or "snake"),
-            captains=captain_label(custom.captain_method or "random"),
-        ),
+        description=body,
         color=EMBED_COLOR,
     )
     names = "\n".join(f"• <@{u}>" for u in registered[:SHOW_MAX]) or DASH

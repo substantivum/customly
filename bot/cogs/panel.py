@@ -59,6 +59,7 @@ from bot.i18n.ui import LocalizedModal, bind
 from bot.services import bans as bans_svc
 from bot.services import custom as custom_svc
 from bot.services import draft as draft_svc
+from bot.services import games as games_svc
 from bot.services import guild_svc
 from bot.services import maps as maps_svc
 from bot.services import panel_svc
@@ -114,19 +115,23 @@ def _picker_options(customs: list[Custom]) -> list[discord.SelectOption]:
 
 # ============================================================== modals ========
 class CreateCustomModal(LocalizedModal):
-    """Step 2 of creation — map pool and draft mode were already chosen on the
-    Create screen. (Discord modals cannot contain dropdowns, hence two steps.)"""
+    """Step 2 of creation — game, map pool and draft mode were already chosen
+    on the Create screen. (Discord modals cannot contain dropdowns, hence two
+    steps.)"""
 
     def __init__(self, maps: list[str] | None = None, draft_mode: str = "snake",
-                 captain_method: str = "random"):
+                 captain_method: str = "random", game: str = "valorant"):
         super().__init__(title=t("modal.create.title"))
         self.maps = maps or []
         self.draft_mode = draft_mode
         self.captain_method = captain_method
+        self.game = game
         self.name = discord.ui.TextInput(
             label=t("modal.create.name"), placeholder=t("modal.create.name_ph"),
             max_length=64,
         )
+        # CS2 is BO1-only (see bot.services.games) — the field is fixed rather
+        # than shown, so there's nothing to pick wrong.
         self.fmt = discord.ui.TextInput(
             label=t("modal.create.fmt"), default="BO1", max_length=3
         )
@@ -137,7 +142,11 @@ class CreateCustomModal(LocalizedModal):
             label=t("modal.create.start"), placeholder=t("modal.create.start_ph"),
             required=False,
         )
-        for item in (self.name, self.fmt, self.team_size, self.start):
+        items = [self.name]
+        if game != "cs2":
+            items.append(self.fmt)
+        items += [self.team_size, self.start]
+        for item in items:
             self.add_item(item)
 
     async def on_submit(self, itx: discord.Interaction):
@@ -151,7 +160,7 @@ class CreateCustomModal(LocalizedModal):
                 itx, name=self.name.value, fmt=self.fmt.value,
                 start_raw=self.start.value, maps_csv=",".join(self.maps),
                 team_size=ts_, draft_mode=self.draft_mode,
-                captain_method=self.captain_method,
+                captain_method=self.captain_method, game=self.game,
             )
         except (BotError, ValueError) as e:
             return await reply(itx, str(e))
@@ -346,6 +355,7 @@ class CreateScreen(_Gated):
     def __init__(self, guild_id: int, parent: Screen | None = None):
         super().__init__(parent)
         self.guild_id = guild_id
+        self.game = "valorant"
         self.selected: list[str] = []
         self.draft_mode = "snake"
         self.captain_method = "random"
@@ -353,19 +363,26 @@ class CreateScreen(_Gated):
         self._competitive: list[str] = []
 
     async def embed(self) -> discord.Embed:
-        self._maps = await maps_svc.enabled_maps(self.guild_id)
-        self._competitive = await maps_svc.competitive_names(self.guild_id)
+        has_veto = games_svc.has_veto(self.game)
+        if has_veto:
+            self._maps = await maps_svc.enabled_maps(self.guild_id, self.game)
+            self._competitive = await maps_svc.competitive_names(self.guild_id, self.game)
+        else:
+            self._maps = []
+            self._competitive = []
         e = discord.Embed(
             title=t("screen.create.title"),
             description=t("screen.create.desc"),
             color=EMBED_COLOR,
         )
-        e.add_field(
-            name=t("common.maps"),
-            value=", ".join(self.selected) if self.selected
-            else t("screen.create.all_maps", n=len(self._maps)),
-            inline=False,
-        )
+        e.add_field(name=t("common.game"), value=games_svc.game_label(self.game), inline=True)
+        if has_veto:
+            e.add_field(
+                name=t("common.maps"),
+                value=", ".join(self.selected) if self.selected
+                else t("screen.create.all_maps", n=len(self._maps)),
+                inline=False,
+            )
         e.add_field(name=t("common.draft"),
                     value=draft_svc.draft_mode_label(self.draft_mode), inline=True)
         e.add_field(
@@ -374,22 +391,47 @@ class CreateScreen(_Gated):
                   f"_{draft_svc.captain_help(self.captain_method)}_",
             inline=True,
         )
-        e.add_field(name=t("board.competitive"),
-                    value=", ".join(self._competitive) if self._competitive
-                    else DASH,
-                    inline=False)
-        if not self._maps:
-            e.description = t("screen.create.no_maps")
+        if has_veto:
+            e.add_field(name=t("board.competitive"),
+                        value=", ".join(self._competitive) if self._competitive
+                        else DASH,
+                        inline=False)
+            if not self._maps:
+                e.description = t("screen.create.no_maps")
         return e
 
     async def build(self) -> None:
-        if not self._maps:
+        has_veto = games_svc.has_veto(self.game)
+        if has_veto and not self._maps:
+            self.add_item(self._Game(self.game))
             return
-        self.add_item(self._Pool(self._maps, self.selected))
+        if has_veto:
+            self.add_item(self._Pool(self._maps, self.selected))
         self.add_item(self._DraftMode(self.draft_mode))
         self.add_item(self._Captains(self.captain_method))
-        self.add_item(self._Competitive())
+        if has_veto:
+            self.add_item(self._Competitive())
         self.add_item(self._Continue())
+        self.add_item(self._Game(self.game))
+
+    class _Game(discord.ui.Select):
+        def __init__(self, current: str):
+            super().__init__(
+                placeholder=t("screen.create.game_ph"),
+                options=[
+                    discord.SelectOption(
+                        label=games_svc.game_label(g), value=g, default=g == current,
+                    )
+                    for g in games_svc.GAMES
+                ],
+                row=4,
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            view: CreateScreen = self.view
+            view.game = self.values[0]
+            view.selected = []  # the previous game's map pool doesn't apply
+            await view.reload(itx)
 
     class _Pool(discord.ui.Select):
         def __init__(self, maps: list[Map], selected: list[str]):
@@ -473,7 +515,8 @@ class CreateScreen(_Gated):
             if view.selected and len(view.selected) < 2:
                 return await reply(itx, t("screen.create.min_maps"))
             await itx.response.send_modal(
-                CreateCustomModal(view.selected, view.draft_mode, view.captain_method)
+                CreateCustomModal(view.selected, view.draft_mode, view.captain_method,
+                                  game=view.game)
             )
 
 

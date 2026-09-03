@@ -16,6 +16,7 @@ STRINGS: dict[str, str] = {
     "common.seats": "Seats",
     "common.players": "Players",
     "common.waitlist": "Waitlist",
+    "common.game": "Game",
     "common.maps": "Maps",
     "common.draft": "Draft",
     "common.captains": "Captains",
@@ -92,6 +93,8 @@ STRINGS: dict[str, str] = {
     "btn.cant_play": "Can't play",
     "btn.attack": "Attack",
     "btn.defence": "Defence",
+    "btn.side.t": "T",
+    "btn.side.ct": "CT",
 
     # -------------------------------------------------------------- errors ---
     "error.generic": "Something went wrong.",
@@ -199,7 +202,8 @@ STRINGS: dict[str, str] = {
     ),
     "error.conflict": "Conflicts with **{name}** ({start}–{end}).",
     "error.already_registered": "Already registered.",
-    "error.format": "Format must be BO1, BO3 or BO5.",
+    "error.game": "Game must be one of: {games}.",
+    "error.format_for_game": "{game} customs must use one of: {formats}.",
     "error.team_size": "Team size must be between 1 and 5 (1v1 to 5v5).",
     "error.draft_mode": "Draft mode must be one of: {modes}.",
     "error.captain_method": "Captain method must be one of: {methods}.",
@@ -240,10 +244,19 @@ STRINGS: dict[str, str] = {
     "custom.asap_full": "**ASAP** — as soon as the lobby is ready",
     "custom.reg.title": "Custom #{custom_id} — {name}",
     "custom.reg.body": (
+        "**Game:** {game}\n"
         "**Format:** {fmt}  ·  **{size}v{size}**\n"
         "**Starts:** {start}\n"
         "**Block:** {from_time} – {to_time}\n"
         "**Map pool:** {pool}\n"
+        "**Draft:** {draft}\n"
+        "**Captains:** {captains}"
+    ),
+    "custom.reg.body_no_maps": (
+        "**Game:** {game}\n"
+        "**Format:** {fmt}  ·  **{size}v{size}**\n"
+        "**Starts:** {start}\n"
+        "**Block:** {from_time} – {to_time}\n"
         "**Draft:** {draft}\n"
         "**Captains:** {captains}"
     ),
@@ -362,6 +375,11 @@ STRINGS: dict[str, str] = {
     "screen.create.pool_ph": "Map pool — pick 2+ maps (none = whole enabled pool)…",
     "screen.create.draft_ph": "Draft mode — snake (default) or one by one…",
     "screen.create.captains_ph": "Captains — how the two captains are chosen…",
+    "screen.create.game_ph": "Game — Valorant, Dota 2 or CS2…",
+
+    "game.valorant": "Valorant",
+    "game.dota2": "Dota 2",
+    "game.cs2": "CS2",
 
     "screen.manage_list.title": "Manage customs",
     "screen.manage_list.desc_all": "Every active custom in the server.",
@@ -561,6 +579,8 @@ STRINGS: dict[str, str] = {
     "veto.turn": "Turn",
     "veto.attack": "attack",
     "veto.defence": "defence",
+    "veto.side.t": "T",
+    "veto.side.ct": "CT",
     "veto.action.ban": "ban",
     "veto.action.pick": "pick",
     "veto.turn_action": "{captain} to {action}",
@@ -735,6 +755,10 @@ STRINGS: dict[str, str] = {
     "cmd.custom.create.draft": "How players are drafted: snake, or one by one. Default snake.",
     "cmd.custom.create.captains": "How captains are chosen when this custom starts. "
                                   "Default random.",
+    "cmd.custom.create.game": (
+        "Which game this custom is for. Default Valorant. "
+        "CS2 is BO1-only; Dota 2 has no map veto."
+    ),
     "cmd.custom.register.desc": "Register for a custom by id.",
     "cmd.custom.leave.desc": "Leave a custom by id.",
     "cmd.custom.list.desc": "List active customs.",
@@ -764,11 +788,12 @@ STRINGS: dict[str, str] = {
     "cmd.match.end.force": "End it even though nobody reported the result (admin)",
 
     "cmd.maps.list.desc": "List the guild map pool.",
-    "cmd.maps.seed.desc": "Seed the default Valorant pool.",
+    "cmd.maps.seed.desc": "Seed the default pool for a game (default Valorant).",
     "cmd.maps.competitive.desc": "Set the current competitive map pool (admin). Empty clears it.",
     "cmd.maps.competitive.maps": (
         "Comma-separated maps in the active rotation — blank to clear the pool"
     ),
+    "cmd.maps.game": "Which game's map pool. Default Valorant.",
     "cmd.maps.add.desc": "Add a map.",
     "cmd.maps.remove.desc": "Remove a map.",
     "cmd.maps.toggle.desc": "Enable/disable a map.",

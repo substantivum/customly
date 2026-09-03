@@ -622,6 +622,47 @@ def test_asap_parses_to_now_not_an_error():
     assert before <= got <= after
 
 
+# ------------------------------------------------------------------ games ---
+def test_dota2_has_no_veto_but_keeps_all_formats():
+    from bot.services.games import allowed_formats, has_veto
+
+    assert has_veto("dota2") is False
+    assert allowed_formats("dota2") == ("BO1", "BO3", "BO5")
+
+
+def test_cs2_has_a_veto_but_only_bo1():
+    from bot.services.games import allowed_formats, has_veto
+
+    assert has_veto("cs2") is True
+    assert allowed_formats("cs2") == ("BO1",)
+
+
+def test_valorant_keeps_its_existing_formats():
+    from bot.services.games import allowed_formats, has_veto
+
+    assert has_veto("valorant") is True
+    assert allowed_formats("valorant") == ("BO1", "BO3", "BO5")
+
+
+def test_side_labels_are_t_ct_only_for_cs2():
+    from bot.services.games import side_label
+
+    assert side_label("valorant", "attack") == "attack"
+    assert side_label("valorant", "defence") == "defence"
+    assert side_label("cs2", "attack") == "T"
+    assert side_label("cs2", "defence") == "CT"
+
+
+def test_cs2_pool_needs_only_two_maps_not_the_valorant_seven():
+    """CS2 is BO1-only, and BO1's veto is generic over pool size — unlike
+    BO3/BO5, which stay pinned to the 7-map competitive pool."""
+    from bot.services.veto import check_pool
+
+    check_pool("BO1", 2)  # does not raise
+    with pytest.raises(BotError):
+        check_pool("BO1", 1)
+
+
 def test_asap_customs_still_conflict_on_overlap():
     """Two ASAP customs start at the same instant, so they must clash."""
     now = datetime.now(timezone.utc)
