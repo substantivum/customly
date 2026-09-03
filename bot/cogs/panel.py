@@ -424,7 +424,7 @@ class CreateScreen(_Gated):
                     )
                     for g in games_svc.GAMES
                 ],
-                row=4,
+                row=3,
             )
 
         async def callback(self, itx: discord.Interaction):
@@ -496,7 +496,7 @@ class CreateScreen(_Gated):
     class _Competitive(discord.ui.Button):
         def __init__(self):
             super().__init__(label=t("btn.competitive_pool"),
-                             style=discord.ButtonStyle.primary, row=3)
+                             style=discord.ButtonStyle.primary, row=4)
 
         async def callback(self, itx: discord.Interaction):
             view: CreateScreen = self.view
@@ -508,7 +508,7 @@ class CreateScreen(_Gated):
     class _Continue(discord.ui.Button):
         def __init__(self):
             super().__init__(label=t("btn.continue"),
-                             style=discord.ButtonStyle.success, row=3)
+                             style=discord.ButtonStyle.success, row=4)
 
         async def callback(self, itx: discord.Interaction):
             view: CreateScreen = self.view
