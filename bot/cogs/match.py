@@ -129,12 +129,19 @@ class MatchCog(commands.GroupCog, name="match"):
         await reply(itx, t("code.set", custom_id=custom_id))
 
     @app_commands.command(description=L("cmd.match.end.desc"))
-    @app_commands.describe(custom_id=L("cmd.match.end.custom_id"))
-    async def end(self, itx: discord.Interaction, custom_id: int):
+    @app_commands.describe(custom_id=L("cmd.match.end.custom_id"),
+                           force=L("cmd.match.end.force"))
+    async def end(self, itx: discord.Interaction, custom_id: int, force: bool = False):
+        # Ending a match whose result nobody reported throws the game away, so
+        # the command refuses by default and points at the result form. `force`
+        # is for the custom that genuinely has no result — abandoned, half the
+        # lobby gone — and is staff-only because it writes off everyone's wins.
+        if force and not await is_admin(itx.user):
+            raise PermissionDenied(t("error.force_admin"))
         # Reply first — end_custom deletes the custom's channels.
         await itx.response.send_message(t("custom.ending_cmd", custom_id=custom_id),
                                         ephemeral=True)
-        await actions.end_custom(itx, custom_id)
+        await actions.end_custom(itx, custom_id, require_result=not force)
 
 
 async def setup(bot: commands.Bot):

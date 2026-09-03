@@ -1072,11 +1072,85 @@ async def set_party_code(
     await audit.log(itx.guild_id, itx.user.id, "party_code", str(custom_id))
 
 
+async def played_maps(match_id: int) -> list[str]:
+    """The maps this match actually plays, in the order they're played —
+    every veto `pick` plus the decider. Empty until the veto has run, which
+    is what tells a caller there is no result to ask about yet."""
+    from bot.db.models import MapVeto
+
+    async with SessionLocal() as s:
+        return [
+            r[0] for r in (await s.execute(
+                select(MapVeto.map_name).where(
+                    MapVeto.match_id == match_id,
+                    MapVeto.action.in_(("pick", "decider")),
+                ).order_by(MapVeto.step)
+            )).all()
+        ]
+
+
+async def pending_result(custom_id: int) -> tuple[int, list[str], dict[str, str]] | None:
+    """What still needs reporting before this custom can be ended honestly:
+    `(match_id, maps, already reported as {map: "13-11"})`.
+
+    `None` means there is nothing to ask about — the custom has no match, the
+    veto never finished (so no map was played), or the results already on file
+    settle the series. Everything else means ending now would throw the game
+    away: `_award_wins` has nothing to credit, and the custom silently
+    disappears from everyone's win count.
+    """
+    async with SessionLocal() as s:
+        c = await s.get(Custom, custom_id)
+        # Only a custom that reached `live` has played anything: the veto writes
+        # its picks one at a time, so a custom ended mid-veto would otherwise be
+        # asked for the score of maps that were merely chosen.
+        if not c or not c.match_id or c.state != "live":
+            return None
+        match_id = c.match_id
+        reported = [
+            r for (r,) in (await s.execute(
+                select(MatchResult).where(MatchResult.match_id == match_id)
+                .order_by(MatchResult.map_index)
+            )).all()
+        ]
+    if draft_svc.series_winner([r.winner_side for r in reported]):
+        return None
+    maps = await played_maps(match_id)
+    if not maps:
+        return None
+    return match_id, maps, {r.map_name: f"{r.score_a}-{r.score_b}" for r in reported}
+
+
+async def save_match_results(match_id: int, rows: list[tuple[str, int, int]]) -> None:
+    """Replace this match's results with `[(map_name, score_a, score_b), ...]`,
+    in the order the maps were played.
+
+    A wholesale replace, not an append: the rows come from a form that shows
+    what was already on file, so what comes back *is* the series — merging it
+    with earlier `/match result` reports would double-count the maps the
+    reporter left untouched."""
+    async with SessionLocal() as s:
+        for r in (await s.execute(
+            select(MatchResult).where(MatchResult.match_id == match_id)
+        )).scalars().all():
+            await s.delete(r)
+        await s.flush()
+        for idx, (map_name, score_a, score_b) in enumerate(rows):
+            s.add(MatchResult(
+                match_id=match_id, map_index=idx, map_name=map_name,
+                score_a=score_a, score_b=score_b,
+                winner_side="A" if score_a > score_b else "B",
+            ))
+        await s.commit()
+    log.info("match %s: results set to %s", match_id, rows)
+
+
 async def _award_wins(s, match_id: int) -> None:
     """+1 `User.wins` for every player on the side that won the series,
-    determined from the maps reported via `/match result`. A no-op if
-    nothing was reported, or the two sides are tied (a force-ended custom
-    with no majority yet) — there's no winner to credit."""
+    determined from the maps reported on the result form (or via
+    `/match result`). A no-op if nothing was reported, or the two sides are
+    tied (a force-ended custom with no majority yet) — there's no winner to
+    credit."""
     results = (await s.execute(
         select(MatchResult.winner_side).where(MatchResult.match_id == match_id)
     )).scalars().all()
@@ -1096,9 +1170,18 @@ async def _award_wins(s, match_id: int) -> None:
     log.info("match %s: side %s won, +1 win for %s", match_id, winner_side, winners)
 
 
-async def end_custom(itx: discord.Interaction, custom_id: int) -> None:
+async def end_custom(
+    itx: discord.Interaction, custom_id: int, *, require_result: bool = True
+) -> None:
     """End a match: mark it completed/done, then remove the custom's voice AND
     text channels. Any registered player can end it once it has started.
+
+    `require_result=False` ends a match whose result nobody reported. It is not
+    the default because ending is the last moment the result exists anywhere:
+    the channels go, and with them any chance of asking who won — the maps go
+    uncredited and the custom vanishes from everyone's win count. Callers pass
+    it only after a human has been asked and answered (the result form) or has
+    deliberately forced it.
 
     The caller must have already answered (or deferred) the interaction — the
     text channel this was clicked in is about to disappear."""
@@ -1115,6 +1198,8 @@ async def end_custom(itx: discord.Interaction, custom_id: int) -> None:
         if c.match_id:
             m = await s.get(Match, c.match_id)
             if m:
+                if require_result and await pending_result(custom_id):
+                    raise BotError(t("error.result_missing"))
                 m.state = "completed"
                 await _award_wins(s, c.match_id)
         c.state = "done"

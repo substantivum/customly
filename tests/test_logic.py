@@ -556,6 +556,52 @@ def test_series_winner_needs_a_majority():
     assert series_winner(["B", "A", "B"]) == "B"
 
 
+# ------------------------------------------------------------ match result ---
+@pytest.mark.parametrize("typed", ["13-11", "13:11", "13/11", "13 11", " 13 - 11 "])
+def test_a_score_is_read_whichever_separator_was_typed(typed):
+    from bot.services.draft import parse_map_score
+
+    assert parse_map_score(typed) == (13, 11)
+
+
+@pytest.mark.parametrize("typed", ["", "13", "13-", "13-11-9", "we won", "13-x"])
+def test_anything_that_is_not_two_numbers_is_not_a_score(typed):
+    from bot.services.draft import parse_map_score
+
+    assert parse_map_score(typed) is None
+
+
+def test_a_series_is_the_maps_that_were_filled_in():
+    from bot.services.draft import parse_series
+
+    # A BO3 that ended 2-0: the third map has no score because it never happened.
+    assert parse_series([("Ascent", "13-11"), ("Haven", "13-7"), ("Lotus", "")]) == [
+        ("Ascent", 13, 11), ("Haven", 13, 7),
+    ]
+    assert parse_series([("Ascent", ""), ("Haven", "")]) == []
+
+
+def test_a_score_under_a_blank_map_is_rejected_as_a_slip():
+    from bot.services.draft import parse_series
+
+    with pytest.raises(BotError):
+        parse_series([("Ascent", ""), ("Haven", "13-7")])
+
+
+def test_a_map_cannot_be_reported_as_a_draw():
+    from bot.services.draft import parse_series
+
+    with pytest.raises(BotError):
+        parse_series([("Ascent", "13-13")])
+
+
+def test_an_unreadable_score_is_rejected_rather_than_guessed_at():
+    from bot.services.draft import parse_series
+
+    with pytest.raises(BotError):
+        parse_series([("Ascent", "we won")])
+
+
 # --------------------------------------------------------------- ASAP start ---
 def test_blank_start_means_asap():
     from bot.core.actions import is_asap

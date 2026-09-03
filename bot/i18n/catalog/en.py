@@ -129,6 +129,21 @@ STRINGS: dict[str, str] = {
     "error.result_perm": "Only a captain of this match or an admin can report results.",
     "error.no_draw": "A map can't end in a draw — scores must differ.",
     "error.result_race": "Two results came in at the same moment — please try reporting again.",
+    "error.result_missing": (
+        "Nobody reported who won yet — the result is lost the moment this "
+        "custom is ended. A captain or admin can report it with the "
+        "**End custom** button, or `/match result`."
+    ),
+    "error.result_perm_end": (
+        "The result for this match hasn't been reported, and only a captain "
+        "of it (or an admin) can report it — ask one of them to end the custom."
+    ),
+    "error.bad_score": "**{map}**: `{value}` isn't a score — write it like `13-11`.",
+    "error.result_gap": (
+        "**{map}** was left blank but a later map was filled in — maps are "
+        "played in order, so fill them in from the top."
+    ),
+    "error.force_admin": "Only an admin can end a match without its result.",
     "error.riot_id": "Riot ID must look like `TenZ#NA1` (Name#TAG).",
     "error.riot_not_found": (
         "No Valorant account found for `{tag}` — check the spelling and try again."
@@ -603,6 +618,15 @@ STRINGS: dict[str, str] = {
         "Captains: <@{cap_a}> vs <@{cap_b}> — the coin toss decides who's Team A."
     ),
     "match.result_recorded": "Recorded {map}: A {score_a}–{score_b} B (winner {winner}).",
+    "result.line": "**{map}** — A {score_a}–{score_b} B",
+    "result.recorded_ending": (
+        "Result recorded:\n{lines}\n\nEnding the custom — voice and this "
+        "channel will be removed."
+    ),
+    "result.none_ending": (
+        "No result recorded — nobody gets the win for this one. "
+        "Ending the custom."
+    ),
 
     # --------------------------------------------------------------- lobby ---
     "lobby.title": "Match Lobby — Custom #{custom_id}",
@@ -612,7 +636,10 @@ STRINGS: dict[str, str] = {
     "lobby.voice": "Voice",
     "lobby.map_line": "**{index}. {map}** — Team A {side_a} · Team B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
-    "lobby.footer": "Anyone playing this custom can set the code or end the match.",
+    "lobby.footer": (
+        "Anyone playing this custom can set the code. Ending it asks a "
+        "captain for the result first."
+    ),
     "code.updated": "Party code updated.",
     "modal.create.title": "Create custom",
     "modal.create.name": "Name",
@@ -629,6 +656,9 @@ STRINGS: dict[str, str] = {
     "modal.code.title": "Party code",
     "modal.code.label": "Party / group code",
     "modal.code.ph": "7F3K2",
+    "modal.result.title": "Match result",
+    "modal.result.map": "{index}. {map}",
+    "modal.result.ph": "13-11 — leave blank if not played",
     "code.set": "Party code for Custom #{custom_id} set.",
     "code.announced": "**Party Code — Custom #{custom_id}:** `{code}`  (set by {actor})",
 
@@ -731,6 +761,7 @@ STRINGS: dict[str, str] = {
     "cmd.match.partycode.code": "Party/group code",
     "cmd.match.end.desc": "End the match: mark it done and delete its voice + text channels.",
     "cmd.match.end.custom_id": "Custom whose match to end",
+    "cmd.match.end.force": "End it even though nobody reported the result (admin)",
 
     "cmd.maps.list.desc": "List the guild map pool.",
     "cmd.maps.seed.desc": "Seed the default Valorant pool.",

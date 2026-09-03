@@ -50,6 +50,7 @@ from bot.core.permissions import (
     revoke_role,
 )
 from bot.core.ui import reply
+from bot.core.views import MatchResultModal
 from bot.db import SessionLocal
 from bot.db.models import AuditLog, Custom, Map, MemberRole, User
 from bot.i18n import LANG_NAME, LANGS, lang_context, t
@@ -661,20 +662,32 @@ class ManageScreen(_Gated):
 
         async def callback(self, itx: discord.Interaction):
             view: ManageScreen = self.view
+
+            async def done(itx: discord.Interaction):
+                board.schedule(itx.guild)
+                # The custom is gone from the active list — go back to it rather
+                # than leaving a manage screen for something that no longer runs.
+                if view.parent is not None:
+                    await view.goto(itx, view.parent)
+                else:
+                    await view.reload(itx)
+
+            # A match nobody has reported yet: ask for the score here too, or
+            # the panel stays the one way to end a custom and lose its result.
+            pending = await actions.pending_result(view.cid)
+            if pending:
+                match_id, maps, reported = pending
+                return await itx.response.send_modal(
+                    MatchResultModal(view.cid, match_id, maps, reported, after=done)
+                )
             # Ending deletes the custom's voice AND text channels — ack first.
             await itx.response.defer()
             try:
                 await actions.end_custom(itx, view.cid)
             except BotError as e:
                 return await reply(itx, str(e))
-            board.schedule(itx.guild)
             await reply(itx, t("custom.ended", custom_id=view.cid))
-            # The custom is gone from the active list — go back to it rather than
-            # leaving a manage screen for something that no longer runs.
-            if view.parent is not None:
-                await view.goto(itx, view.parent)
-            else:
-                await view.reload(itx)
+            await done(itx)
 
     class _Delete(discord.ui.Button):
         def __init__(self):

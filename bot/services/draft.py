@@ -48,6 +48,52 @@ def series_winner(map_winners: list[str]) -> str | None:
     return "A" if a > b else "B"
 
 
+# The separators people actually type when reporting a score, all folded to
+# one before the split: `13-11`, `13:11`, `13/11`, `13 11`.
+_SCORE_SEPARATORS = str.maketrans(":;/ ", "----")
+
+
+def parse_map_score(text: str) -> tuple[int, int] | None:
+    """`"13-11"` -> `(13, 11)`, or None if it isn't a score at all.
+
+    This gets typed seconds after the game ended by someone who wants the
+    lobby gone, so every separator anyone reaches for is accepted (spaces
+    around it included). Anything that isn't two plain numbers is rejected
+    rather than guessed at — a wrong score recorded silently is worse than
+    being asked to type it again."""
+    parts = [p for p in text.strip().translate(_SCORE_SEPARATORS).split("-") if p]
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    return int(parts[0]), int(parts[1])
+
+
+def parse_series(entries: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
+    """The result form as typed, `[(map, "13-11"), ...]`, turned into the maps
+    actually played: `[(map, score_a, score_b), ...]`.
+
+    A blank is a map that wasn't played — how a BO3 that ended 2-0 gets
+    reported. Maps are played in the order they're listed, though, so a score
+    *below* a blank one is a slip rather than a skipped map, and is rejected:
+    recording a series nobody played is exactly what this form exists to
+    prevent."""
+    rows: list[tuple[str, int, int]] = []
+    blank: str | None = None
+    for name, raw in entries:
+        raw = raw.strip()
+        if not raw:
+            blank = blank or name
+            continue
+        if blank:
+            raise BotError(t("error.result_gap", map=blank))
+        score = parse_map_score(raw)
+        if not score:
+            raise BotError(t("error.bad_score", map=name, value=raw))
+        if score[0] == score[1]:
+            raise BotError(t("error.no_draw"))
+        rows.append((name, score[0], score[1]))
+    return rows
+
+
 def choose_captains(
     method: CaptainMethod,
     players: list[dict],            # [{user_id, cur_rr, peak_rank}]

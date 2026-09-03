@@ -167,6 +167,80 @@ class PartyCodeButton(
         await itx.response.send_modal(PartyCodeModal(self.cid, itx.message))
 
 
+class MatchResultModal(LocalizedModal):
+    """Ask for the score of every map played, then end the custom.
+
+    Ending is the last moment the result exists anywhere — the channel this was
+    clicked in is about to be deleted, and the ten people who know who won go
+    with it — so the scores are collected here rather than left to a
+    `/match result` nobody remembers to run.
+
+    `after` is awaited with this modal's own interaction once the custom is
+    gone, for a caller (the staff panel) whose message has to be redrawn.
+    """
+
+    def __init__(
+        self,
+        custom_id: int,
+        match_id: int,
+        maps: list[str],
+        reported: dict[str, str] | None = None,
+        *,
+        after=None,
+    ):
+        super().__init__(title=t("modal.result.title"))
+        self.cid = custom_id
+        self.match_id = match_id
+        self.after = after
+        self.fields: list[tuple[str, discord.ui.TextInput]] = []
+        reported = reported or {}
+        # Discord allows five inputs per modal and a BO5 plays five maps, so the
+        # longest series this bot runs fits exactly.
+        for i, name in enumerate(maps[:5], start=1):
+            field = discord.ui.TextInput(
+                label=t("modal.result.map", index=i, map=name)[:45],
+                placeholder=t("modal.result.ph"),
+                default=reported.get(name),
+                required=False,
+                max_length=16,
+            )
+            self.add_item(field)
+            self.fields.append((name, field))
+
+    async def on_submit(self, itx: discord.Interaction):
+        from bot.core import actions
+        from bot.services import draft as draft_svc
+
+        try:
+            rows = draft_svc.parse_series(
+                [(name, field.value or "") for name, field in self.fields]
+            )
+        except BotError as e:
+            # A typo shouldn't cost them the custom: the modal is answered with
+            # what's wrong and the lobby is left standing to try again.
+            return await itx.response.send_message(str(e), ephemeral=True)
+        # Answer first — end_custom deletes the channel this was opened from.
+        if rows:
+            lines = "\n".join(
+                t("result.line", map=m, score_a=a, score_b=b) for m, a, b in rows
+            )
+            await itx.response.send_message(
+                t("result.recorded_ending", lines=lines), ephemeral=True
+            )
+        else:
+            await itx.response.send_message(t("result.none_ending"), ephemeral=True)
+        try:
+            if rows:
+                await actions.save_match_results(self.match_id, rows)
+            # The question was asked and answered: an empty form is a deliberate
+            # "nobody won this one", not the silent loss the guard exists for.
+            await actions.end_custom(itx, self.cid, require_result=False)
+        except BotError as e:
+            return await itx.followup.send(str(e), ephemeral=True)
+        if self.after:
+            await self.after(itx)
+
+
 class EndCustomButton(
     discord.ui.DynamicItem[discord.ui.Button],
     template=r"lobby:end:(?P<cid>\d+)",
@@ -190,11 +264,27 @@ class EndCustomButton(
 
     async def callback(self, itx: discord.Interaction):
         from bot.core import actions
+        from bot.core.permissions import is_admin
 
         await bind(itx)
         if not await actions.can_play_custom(self.cid, itx.user):
             return await itx.response.send_message(t("error.end_perm"), ephemeral=True)
-        # Answer before ending — end_custom deletes the channel we're sitting in.
+        pending = await actions.pending_result(self.cid)
+        if pending:
+            match_id, maps, reported = pending
+            # Who won is the one thing a player can't be trusted to say about
+            # their own game, so the same people who may run `/match result`
+            # are the ones who may answer the form.
+            if not (await actions.is_match_captain(match_id, itx.user.id)
+                    or await is_admin(itx.user)):
+                return await itx.response.send_message(
+                    t("error.result_perm_end"), ephemeral=True
+                )
+            return await itx.response.send_modal(
+                MatchResultModal(self.cid, match_id, maps, reported)
+            )
+        # Nothing to report (no veto happened, or the result is already in) —
+        # answer before ending, end_custom deletes the channel we're sitting in.
         await itx.response.send_message(t("custom.ending"), ephemeral=True)
         try:
             await actions.end_custom(itx, self.cid)
