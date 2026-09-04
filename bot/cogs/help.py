@@ -69,6 +69,7 @@ _SECTIONS: list[tuple[str, list[tuple[str, str, int]]]] = [
         ("/admin audit", "cmd.admin.audit.desc", ADMIN),
         ("/admin ban", "cmd.admin.ban.desc", ADMIN),
         ("/admin unban", "cmd.admin.unban.desc", ADMIN),
+        ("/admin unlink", "cmd.admin.unlink.desc", ADMIN),
         ("/admin bans", "cmd.admin.bans.desc", ADMIN),
         ("/admin notify_role", "cmd.admin.notify_role.desc", ADMIN),
     ]),

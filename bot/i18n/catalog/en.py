@@ -826,6 +826,13 @@ STRINGS: dict[str, str] = {
     "profile.unlink.nothing": "Nothing linked there to remove.",
     "profile.unlink.done": "Unlinked **{what}**.",
     "profile.main.done": "Main game set to **{game}**.",
+    "profile.unlink.opt.all": "Everything",
+    "admin.unlink.done": "Removed {member}'s **{what}**.",
+    "admin.unlink.nothing": "{member} has nothing linked there to remove.",
+    "admin.unlink.dm": (
+        "An admin on **{guild}** removed your **{what}** from your profile. "
+        "Re-register if that's a mistake."
+    ),
 
     # --------------------------------------------------------------- stats ---
     "stats.none": "No stats yet.",
@@ -946,6 +953,9 @@ STRINGS: dict[str, str] = {
     "cmd.unlink.what": "Which identity to unlink",
     "cmd.setmain.desc": "Set your main game — it accents your profile card.",
     "cmd.setmain.game": "Your main game",
+    "cmd.admin.unlink.desc": "Revert a player's linked identity (Riot ID, Faceit, Dota, Steam).",
+    "cmd.admin.unlink.member": "The player whose identity to remove",
+    "cmd.admin.unlink.what": "Which identity to remove",
 
     "cmd.stats.me.desc": "Your stats.",
     "cmd.stats.leaderboard.desc": "Wins leaderboard.",

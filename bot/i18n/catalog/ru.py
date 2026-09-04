@@ -814,6 +814,13 @@ STRINGS: dict[str, str] = {
     "profile.unlink.nothing": "Здесь нечего отвязывать.",
     "profile.unlink.done": "Отвязано: **{what}**.",
     "profile.main.done": "Основная игра: **{game}**.",
+    "profile.unlink.opt.all": "Всё",
+    "admin.unlink.done": "У {member} убрано: **{what}**.",
+    "admin.unlink.nothing": "У {member} здесь нечего убирать.",
+    "admin.unlink.dm": (
+        "Админ сервера **{guild}** убрал из вашего профиля: **{what}**. "
+        "Зарегистрируйтесь заново, если это ошибка."
+    ),
 
     # ----------------------------------------------------------- статистика ---
     "stats.none": "Статистики пока нет.",
@@ -924,6 +931,9 @@ STRINGS: dict[str, str] = {
     "cmd.unlink.what": "Что отвязать",
     "cmd.setmain.desc": "Указать основную игру — она задаёт акцент карточки профиля.",
     "cmd.setmain.game": "Ваша основная игра",
+    "cmd.admin.unlink.desc": "Сбросить привязанную личность игрока (Riot ID, Faceit, Dota, Steam).",
+    "cmd.admin.unlink.member": "Игрок, чью личность убрать",
+    "cmd.admin.unlink.what": "Какую личность убрать",
 
     "cmd.stats.me.desc": "Ваша статистика.",
     "cmd.stats.leaderboard.desc": "Таблица лидеров по победам.",

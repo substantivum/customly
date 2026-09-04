@@ -6,16 +6,24 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from bot.core import audit
+from bot.core import audit, board
 from bot.core.permissions import grant_role, is_superadmin, require, revoke_role
 from bot.core.ui import reply
 from bot.db import SessionLocal
-from bot.db.models import AuditLog
+from bot.db.models import AuditLog, User
 from bot.i18n import t
 from bot.i18n.translator import L
 from bot.services import bans as bans_svc, guild_svc
+from bot.services.identity import clear_identity
 
 GRANTABLE = ["admin", "superadmin", "player"]
+_UNLINK_CHOICES = [
+    app_commands.Choice(name=L("profile.unlink.opt.valorant"), value="valorant"),
+    app_commands.Choice(name=L("profile.unlink.opt.cs2"), value="cs2"),
+    app_commands.Choice(name=L("profile.unlink.opt.dota"), value="dota2"),
+    app_commands.Choice(name=L("profile.unlink.opt.steam"), value="steam"),
+    app_commands.Choice(name=L("profile.unlink.opt.all"), value="all"),
+]
 _ROLE_CHOICES = [
     app_commands.Choice(name=L(f"role.{r}"), value=r) for r in GRANTABLE
 ]
@@ -94,6 +102,30 @@ class AdminCog(commands.GroupCog, name="admin"):
         lines = [f"\u2022 <@{b.user_id}>" + (f" \u2014 {b.reason}" if b.reason else "")
                  for b in rows]
         await reply(itx, "\n".join(lines))
+
+    @app_commands.command(description=L("cmd.admin.unlink.desc"))
+    @app_commands.describe(member=L("cmd.admin.unlink.member"), what=L("cmd.admin.unlink.what"))
+    @app_commands.choices(what=_UNLINK_CHOICES)
+    @require("admin")
+    async def unlink(self, itx: discord.Interaction, member: discord.Member,
+                     what: app_commands.Choice[str]):
+        """Revert a player's linked identity: the admin-side twin of /unlink,
+        for a wrong (or someone else's) account the player won't fix."""
+        async with SessionLocal() as s:
+            u = await s.get(User, member.id)
+            cleared = bool(u) and clear_identity(u, what.value)
+            if cleared:
+                await s.commit()
+        if not cleared:
+            return await reply(itx, t("admin.unlink.nothing", member=member.mention))
+        await audit.log(itx.guild_id, itx.user.id, "identity_unlink",
+                        f"{what.value}:{member.id}")
+        board.schedule(itx.guild)  # a cleared pending identity changes the approvals count
+        try:
+            await member.send(t("admin.unlink.dm", what=what.name, guild=itx.guild.name))
+        except discord.HTTPException:
+            pass
+        await reply(itx, t("admin.unlink.done", member=member.mention, what=what.name))
 
     @app_commands.command(description=L("cmd.admin.notify_role.desc"))
     @app_commands.describe(role=L("cmd.admin.notify_role.param"))

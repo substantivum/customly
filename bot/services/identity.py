@@ -51,3 +51,43 @@ def faceit_url(nick: str) -> str:
 def opendota_url(friend_id: str | None) -> str | None:
     s = (friend_id or "").strip()
     return f"https://www.opendota.com/players/{s}" if s.isdigit() else None
+
+
+# ------------------------------------------------------------- unlinking ---
+# One place that knows how to wipe each identity, shared by the player's own
+# /unlink and the admin's /admin unlink so the two can never drift apart.
+IDENTITIES = ("valorant", "cs2", "dota2", "steam")
+
+
+def clear_identity(u, what: str) -> bool:
+    """Wipe one identity (or "all") off a User row in place. Returns whether
+    anything was actually linked to clear; the caller commits."""
+    if what == "all":
+        return any([clear_identity(u, w) for w in IDENTITIES])
+    if what == "valorant":
+        if not u.riot_id:
+            return False
+        u.riot_id = u.riot_puuid = u.riot_region = None
+        u.riot_status = u.riot_reviewed_by = u.riot_reviewed_at = None
+        u.cur_rank = u.cur_rr = u.peak_rank = u.rank_updated_at = None
+        return True
+    if what == "cs2":
+        if not u.cs2_nick:
+            return False
+        u.cs2_nick = u.cs2_faceit_id = None
+        u.cs2_status = u.cs2_reviewed_by = u.cs2_reviewed_at = None
+        u.cs2_level = u.cs2_elo = u.cs2_updated_at = None
+        return True
+    if what == "dota2":
+        if not u.dota_friend_id:
+            return False
+        u.dota_friend_id = None
+        u.dota_status = u.dota_reviewed_by = u.dota_reviewed_at = None
+        u.dota_rank_tier = u.dota_leaderboard = u.dota_updated_at = None
+        return True
+    if what == "steam":
+        if not u.steam_id:
+            return False
+        u.steam_id = None
+        return True
+    return False

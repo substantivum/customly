@@ -24,7 +24,13 @@ from bot.i18n.translator import L
 from bot.services import faceit
 from bot.services import games as games_svc
 from bot.services import henrik, opendota, rank_sync
-from bot.services.identity import faceit_url, normalize_tag, opendota_url, steam_url
+from bot.services.identity import (
+    clear_identity,
+    faceit_url,
+    normalize_tag,
+    opendota_url,
+    steam_url,
+)
 
 log = logging.getLogger("customly.profile")
 
@@ -310,29 +316,10 @@ class ProfileCog(commands.Cog):
             u = await s.get(User, itx.user.id)
             if not u:
                 return await reply(itx, t("profile.none"))
-            if what.value == "valorant":
-                if not u.riot_id:
-                    return await reply(itx, t("profile.unlink.nothing"))
-                u.riot_id = u.riot_puuid = u.riot_region = None
-                u.riot_status = u.riot_reviewed_by = u.riot_reviewed_at = None
-                u.cur_rank = u.cur_rr = u.peak_rank = u.rank_updated_at = None
-            elif what.value == "cs2":
-                if not u.cs2_nick:
-                    return await reply(itx, t("profile.unlink.nothing"))
-                u.cs2_nick = u.cs2_faceit_id = None
-                u.cs2_status = u.cs2_reviewed_by = u.cs2_reviewed_at = None
-                u.cs2_level = u.cs2_elo = u.cs2_updated_at = None
-            elif what.value == "dota2":
-                if not u.dota_friend_id:
-                    return await reply(itx, t("profile.unlink.nothing"))
-                u.dota_friend_id = None
-                u.dota_status = u.dota_reviewed_by = u.dota_reviewed_at = None
-                u.dota_rank_tier = u.dota_leaderboard = u.dota_updated_at = None
-            else:  # steam
-                if not u.steam_id:
-                    return await reply(itx, t("profile.unlink.nothing"))
-                u.steam_id = None
+            if not clear_identity(u, what.value):
+                return await reply(itx, t("profile.unlink.nothing"))
             await s.commit()
+        board.schedule(itx.guild)  # a cleared pending identity changes the approvals count
         log.info("unlink: user %s cleared %s", itx.user.id, what.value)
         await reply(itx, t("profile.unlink.done", what=what.name))
 
