@@ -1,0 +1,38 @@
+[project]
+name = "customly"
+version = "1.0.0"
+description = "Discord bot for running Valorant, CS2 and Dota 2 customs — registration, captains, draft, map veto and lobby."
+authors = [
+    { name = "Saltanat Beishenova", email = "saltanatb02@gmail.com" },
+]
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "discord.py>=2.4,<3.0",
+    "aiohttp>=3.9,<4.0",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
+    "aiosqlite>=0.20",
+    "apscheduler>=3.10",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "python-dotenv>=1.0",
+]
+
+[tool.poetry]
+# The bot is run as a module (`python -m bot`), never installed as a package, so
+# the Docker image uses `poetry install --no-root` — this list only tells Poetry
+# what the project is for `poetry build` and editor tooling.
+packages = [{ include = "bot" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests import `bot` straight from the repo root, whichever way pytest is invoked.
+pythonpath = ["."]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

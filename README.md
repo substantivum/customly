@@ -39,12 +39,12 @@ docker compose up -d --build # rebuild after pulling code changes
 
 ## Deploy without Docker
 
+Dependencies are managed with [Poetry](https://python-poetry.org/) (`pipx install poetry`).
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate    # .venv\Scripts\activate on Windows
-pip install -r requirements.txt
-cp .env.example .env         # then edit .env
-python -m bot
+poetry install --only main    # creates a virtualenv and installs the runtime deps
+cp .env.example .env          # then edit .env
+poetry run python -m bot
 ```
 
 The bot reads `DB_PATH` relative to its own working directory, so run it from the project root (this is what makes it portable to panel hosts like Pterodactyl, where the working directory isn't `/app`).
@@ -54,8 +54,8 @@ The bot reads `DB_PATH` relative to its own working directory, so run it from th
 Run the test suite with:
 
 ```bash
-pip install pytest
-pytest
+poetry install                # runtime + dev deps (pytest)
+poetry run pytest
 ```
 
 ## Notes
