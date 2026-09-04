@@ -155,10 +155,15 @@ class PartyCodeModal(LocalizedModal):
         except BotError as e:
             return await itx.followup.send(str(e), ephemeral=True)
         if self.message:
-            embed = await actions.build_lobby_embed(itx.guild, self.cid)
-            if embed:
+            # Rebuild every embed (main + the map picture cards) so the edit
+            # keeps the cards; open_files=False references the art already
+            # attached to this message instead of re-uploading it.
+            embeds, _ = await actions.lobby_message(
+                itx.guild, self.cid, open_files=False
+            )
+            if embeds:
                 try:
-                    await self.message.edit(embed=embed)
+                    await self.message.edit(embeds=embeds)
                 except discord.HTTPException:
                     pass
         await itx.followup.send(games_svc.code_text("updated", game), ephemeral=True)

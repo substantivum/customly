@@ -35,7 +35,15 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.core import actions, audit, board
-from bot.core.embeds import DASH, EMBED_COLOR, custom_registration_embed, member_name, start_line
+from bot.core.embeds import (
+    DASH,
+    EMBED_COLOR,
+    custom_registration_embed,
+    game_color,
+    game_mark,
+    member_name,
+    start_line,
+)
 from bot.core.errors import BotError
 from bot.core.nav import Screen
 from bot.core.permissions import (
@@ -597,7 +605,8 @@ class ManageScreen(_Gated):
         self._roster_full = bool(r.size) and len(r.starters) >= r.size
         method = c.captain_method or "random"
         e = discord.Embed(
-            title=t("screen.manage.title", custom_id=c.custom_id, name=c.name),
+            title=f"{game_mark(c.game)} "
+                  + t("screen.manage.title", custom_id=c.custom_id, name=c.name),
             description=t(
                 "screen.manage.body",
                 dot=board.state_dot(c.state), state=board.state_name(c.state),
@@ -606,7 +615,7 @@ class ManageScreen(_Gated):
                 draft=draft_svc.draft_mode_label(c.draft_mode),
                 captains=draft_svc.captain_label(method),
             ),
-            color=EMBED_COLOR,
+            color=game_color(c.game),
         )
         e.add_field(name=t("common.owner"), value=f"<@{c.owner_id}>", inline=True)
         e.add_field(name=t("common.seats"), value=f"{len(r.starters)}/{r.size}",
@@ -812,6 +821,8 @@ class MapsScreen(_Gated):
             self.add_item(self._Competitive(self._maps))
         self.add_item(self._Seed())
         self.add_item(self._Add())
+        if self._maps:
+            self.add_item(self._Remove())
         self.add_item(self._Game(self.game))
 
     class _Game(discord.ui.Select):
@@ -908,6 +919,69 @@ class MapsScreen(_Gated):
 
         async def callback(self, itx: discord.Interaction):
             await itx.response.send_modal(AddMapModal(self.view))
+
+    class _Remove(discord.ui.Button):
+        """Opens a dedicated picker rather than deleting inline: the main screen's
+        rows are full, and dropping a map (and its competitive flag) is worth its
+        own deliberate step."""
+
+        def __init__(self):
+            super().__init__(label=t("btn.remove_map"), style=discord.ButtonStyle.danger,
+                             row=2)
+
+        async def callback(self, itx: discord.Interaction):
+            view: MapsScreen = self.view
+            await view.goto(itx, MapDeleteScreen(view.guild_id, view.game, parent=view))
+
+
+class MapDeleteScreen(_Gated):
+    """Remove a map from the pool for good. Reachable from the Maps screen; a
+    deleted map can always be brought back with Add or Seed."""
+
+    LEVEL = ADMIN
+
+    def __init__(self, guild_id: int, game: str, parent: Screen | None = None):
+        super().__init__(parent)
+        self.guild_id = guild_id
+        self.game = game
+        self._maps: list[Map] = []
+
+    async def embed(self) -> discord.Embed:
+        self._maps = await maps_svc.all_maps(self.guild_id, self.game)
+        e = discord.Embed(
+            title=t("screen.maps.delete.title"),
+            description=t("screen.maps.delete.desc", game=games_svc.game_label(self.game)),
+            color=EMBED_COLOR,
+        )
+        if not self._maps:
+            e.description = t("screen.maps.empty")
+            return e
+        e.add_field(
+            name=t("board.map_pool"),
+            value=", ".join(m.name for m in self._maps)[:1024],
+            inline=False,
+        )
+        return e
+
+    async def build(self) -> None:
+        if self._maps:
+            self.add_item(self._Pick(self._maps))
+
+    class _Pick(discord.ui.Select):
+        def __init__(self, maps: list[Map]):
+            super().__init__(
+                placeholder=t("screen.maps.delete_ph"),
+                options=[discord.SelectOption(label=m.name, value=m.name) for m in maps[:25]],
+                min_values=1, max_values=1, row=0,
+            )
+
+        async def callback(self, itx: discord.Interaction):
+            view: MapDeleteScreen = self.view
+            name = self.values[0]
+            removed = await maps_svc.remove_map(itx.guild_id, name, itx.user.id)
+            await view.reload(itx)
+            board.schedule(itx.guild)
+            await reply(itx, t("maps.removed", name=name) if removed else t("maps.no_such"))
 
 
 # ------------------------------------------------------------ admin: bans ---

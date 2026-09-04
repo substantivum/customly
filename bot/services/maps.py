@@ -14,7 +14,7 @@ from bot.db.models import Map
 
 DEFAULT_POOLS = {
     "valorant": [
-        "Abyss", "Ascent", "Bind", "Breeze", "Corode", "Haven", "Lotus", "Split", "Summit",
+        "Abyss", "Ascent", "Bind", "Breeze", "Corrode", "Haven", "Lotus", "Split", "Summit",
         "Sunset", "Icebox", "Pearl", "Fracture",
     ],
     "cs2": [

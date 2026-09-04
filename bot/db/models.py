@@ -67,6 +67,16 @@ class User(Base):
     rank_updated_at: Mapped[datetime | None] = mapped_column()       # cache staleness clock
     main_role: Mapped[str | None] = mapped_column(String(16))
     roles_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Which game this player mainly plays — drives the accent of their profile
+    # card. Nullable: a player who never picks one just has no main. Validated in
+    # code (bot.cogs.profile), not by a CHECK, since SQLite can't ALTER one in.
+    main_game: Mapped[str | None] = mapped_column(String(16))
+    # Steam identity, shared by CS2 and Dota 2 (one Steam account covers both).
+    # Trust-based like the Riot ID minus the API: there's no Steam verification
+    # wired up, so this is whatever handle the player gives.
+    steam_id: Mapped[str | None] = mapped_column(String(64))
+    # Dota 2's in-game friend id, optional even when Steam is linked.
+    dota_friend_id: Mapped[str | None] = mapped_column(String(32))
     cur_rank: Mapped[str | None] = mapped_column(String(16))         # API-sourced, approved only
     peak_rank: Mapped[str | None] = mapped_column(String(16))
     cur_rr: Mapped[int | None] = mapped_column(Integer)

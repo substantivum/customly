@@ -14,14 +14,21 @@ import discord
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core import audit, board
+from bot.core import assets, audit, board
 from bot.core.controllers import (
     CoinflipController,
     DraftController,
     ReadyCheckController,
     VetoController,
 )
-from bot.core.embeds import DASH, EMBED_COLOR, custom_registration_embed, member_name
+from bot.core.embeds import (
+    DASH,
+    custom_registration_embed,
+    flow_header,
+    game_color,
+    game_mark,
+    member_name,
+)
 from bot.core.errors import BotError
 from bot.core.naming import channel_slug
 from bot.core.permissions import can_manage_custom, is_admin
@@ -452,7 +459,8 @@ async def _players_meta(ids: list[int], *, refresh_ranks: bool = False) -> list[
 async def _run_draft(guild, channel, custom, match_id, cap_a, cap_b, pool, first_side):
     """Draft the non-captain players, in the custom's configured order."""
     draft = DraftController(match_id, cap_a, cap_b, pool,
-                            mode=custom.draft_mode, first=first_side, guild=guild)
+                            mode=custom.draft_mode, first=first_side, guild=guild,
+                            game=custom.game)
 
     @flow_step(channel, "the map veto" if games_svc.has_veto(custom.game) else "the match lobby")
     async def after_draft():
@@ -583,9 +591,11 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
         return "\n".join(f"<@{u}>" for u in ids) or DASH
 
     e = discord.Embed(
-        title=t("lobby.full_title", name=c.name, match_id=c.match_id, fmt=c.format),
-        color=EMBED_COLOR,
+        title=f"{game_mark(c.game)} "
+              + t("lobby.full_title", name=c.name, match_id=c.match_id, fmt=c.format),
+        color=game_color(c.game),
     )
+    flow_header(e, c.game, c.match_id, "live", fmt=c.format)
     # The captain is named in the field header rather than crowned in the list —
     # the roster below is then just the roster.
     for side, label in (("A", "common.team_a"), ("B", "common.team_b")):
@@ -639,6 +649,96 @@ async def build_lobby_embed(guild: discord.Guild, custom_id: int) -> discord.Emb
     return e
 
 
+async def _lobby_maps(custom_id: int) -> tuple[str | None, list[str], dict[str, tuple[str, str]]]:
+    """(game, picked maps in play order, {map: (chooser, choice)}) — the data the
+    lobby's per-map image cards are built from. Read straight from the DB so a
+    card survives a restart, exactly like build_lobby_embed."""
+    from bot.db.models import MapVeto, MatchMapSide
+
+    async with SessionLocal() as s:
+        c = await s.get(Custom, custom_id)
+        if not c or not c.match_id:
+            return None, [], {}
+        m = await s.get(Match, c.match_id)
+        maps = [
+            r[0] for r in (await s.execute(
+                select(MapVeto.map_name).where(
+                    MapVeto.match_id == c.match_id,
+                    MapVeto.action.in_(("pick", "decider")),
+                ).order_by(MapVeto.step)
+            )).all()
+        ]
+        sides = {
+            r.map_name: (r.team_side, r.choice)
+            for (r,) in (await s.execute(
+                select(MatchMapSide).where(MatchMapSide.match_id == c.match_id)
+                .order_by(MatchMapSide.map_index)
+            )).all()
+        }
+        if not sides and m and m.side_map and m.side_pick and m.side_pick_side:
+            sides = {m.side_map: (m.side_pick_side, m.side_pick)}
+        return c.game, maps, sides
+
+
+def _map_image_embeds(
+    game: str, maps: list[str], sides: dict[str, tuple[str, str]], *, open_files: bool,
+) -> tuple[list[discord.Embed], list[discord.File]]:
+    """One image card per picked map that has bundled art — empty when none is
+    bundled, so the lobby's plain map list is the graceful fallback.
+
+    `open_files=True` (the first send) attaches the picture bytes; `False` (a
+    redraw, e.g. after the party code is set) references the attachment already
+    on the message by its deterministic name, so nothing is re-uploaded.
+    """
+    embeds: list[discord.Embed] = []
+    files: list[discord.File] = []
+    total = len(maps)
+    for i, name in enumerate(maps, start=1):
+        if open_files:
+            got = assets.map_image_file(game, name, i)
+            if got is None:
+                continue
+            file, fname = got
+            files.append(file)
+        else:
+            fname = assets.map_attachment_name(game, name, i)
+            if fname is None:
+                continue
+        decider = total > 1 and i == total
+        card = discord.Embed(
+            title=t("lobby.map_card_decider" if decider else "lobby.map_card",
+                    index=i, total=total, map=name),
+            color=game_color(game),
+        )
+        chooser, choice = sides.get(name, (None, None))
+        if chooser:
+            flip = "defence" if choice == "attack" else "attack"
+            card.description = t(
+                "lobby.map_card_sides",
+                side_a=games_svc.side_label(choice if chooser == "A" else flip),
+                side_b=games_svc.side_label(choice if chooser == "B" else flip),
+            )
+        card.set_image(url=f"attachment://{fname}")
+        embeds.append(card)
+    return embeds, files
+
+
+async def lobby_message(
+    guild: discord.Guild, custom_id: int, *, open_files: bool = True,
+) -> tuple[list[discord.Embed], list[discord.File]]:
+    """The whole lobby as it goes on the wire: the main embed plus a picture card
+    per picked map. `open_files=False` rebuilds it for an in-place edit without
+    re-uploading the map art already attached to the message."""
+    main = await build_lobby_embed(guild, custom_id)
+    if main is None:
+        return [], []
+    game, maps, sides = await _lobby_maps(custom_id)
+    if not game:
+        return [main], []
+    img_embeds, files = _map_image_embeds(game, maps, sides, open_files=open_files)
+    return [main, *img_embeds], files
+
+
 async def finish_match(guild, channel, custom, match_id):
     """Veto (or draft, for games with none) done → mark the match live and post
     the final lobby for everyone."""
@@ -652,9 +752,10 @@ async def finish_match(guild, channel, custom, match_id):
         await s.commit()
     ACTIVE_VETO.pop(match_id, None)
 
-    e = await build_lobby_embed(guild, custom.custom_id)
-    if e:
-        await channel.send(embed=e, view=lobby_view(custom.custom_id, game=custom.game))
+    embeds, files = await lobby_message(guild, custom.custom_id)
+    if embeds:
+        await channel.send(embeds=embeds, files=files,
+                           view=lobby_view(custom.custom_id, game=custom.game))
 
 
 async def begin_match(
@@ -774,7 +875,7 @@ async def begin_match(
     # Team B. It runs even in a 1v1, where there's no draft to order but Team A
     # still bans first. The captains may swap letters, so read them back off the
     # controller rather than trusting the pair we came in with.
-    coin = CoinflipController(match_id, cap_a, cap_b, guild=guild)
+    coin = CoinflipController(match_id, cap_a, cap_b, guild=guild, game=c.game)
 
     @flow_step(channel, "the draft")
     async def after_coin(toss: CoinflipController):

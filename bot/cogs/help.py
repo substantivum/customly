@@ -46,9 +46,12 @@ _SECTIONS: list[tuple[str, list[tuple[str, str, int]]]] = [
     ]),
     ("help.section.profile", [
         ("/register", "cmd.profile.register.desc", PLAYER),
+        ("/link", "cmd.link.desc", PLAYER),
+        ("/setmain", "cmd.setmain.desc", PLAYER),
         ("/profile", "cmd.profile.view.desc", PLAYER),
         ("/refresh_rank", "cmd.profile.refresh.desc", PLAYER),
         ("/unregister", "cmd.profile.unregister.desc", PLAYER),
+        ("/unlink", "cmd.unlink.desc", PLAYER),
     ]),
     ("help.section.stats", [
         ("/stats me", "cmd.stats.me.desc", PLAYER),

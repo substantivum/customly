@@ -20,7 +20,7 @@ import discord
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.core.embeds import DASH, EMBED_COLOR, member_name, start_text
+from bot.core.embeds import DASH, EMBED_COLOR, game_mark, member_name, start_text
 from bot.db import SessionLocal
 from bot.db.models import Ban, Custom, MemberRole
 from bot.i18n import LANG_NAME, t, use_lang
@@ -84,8 +84,9 @@ async def custom_line(
 ) -> str:
     """One custom as a single readable line on a board."""
     taken, size, waiting = await seats(c)
+    game = getattr(c, "game", "valorant") or "valorant"
     bits = [
-        f"{state_dot(c.state)} **#{c.custom_id} · {c.name}**",
+        f"{state_dot(c.state)} {game_mark(game)} **#{c.custom_id} · {c.name}**",
         t("board.line.seats", fmt=c.format, size=c.team_size, taken=taken, total=size)
         + (t("board.line.waiting", n=waiting) if waiting else ""),
         (start_text(c) if c.start_asap

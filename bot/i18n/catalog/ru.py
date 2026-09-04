@@ -75,6 +75,7 @@ STRINGS: dict[str, str] = {
     "btn.delete": "Удалить",
     "btn.seed": "Загрузить стандартные",
     "btn.add_map": "Добавить карту",
+    "btn.remove_map": "Удалить карту",
     "btn.competitive_pool": "Соревновательный пул",
     "btn.ban": "Забанить",
     "btn.unban": "Разбанить",
@@ -404,6 +405,9 @@ STRINGS: dict[str, str] = {
     "screen.maps.in_comp": "в соревновательном пуле",
     "screen.maps.flipped": "**{name}** → {state}",
     "screen.maps.nothing": "Нечего переключать.",
+    "screen.maps.delete.title": "Удалить карту",
+    "screen.maps.delete.desc": "Выберите карту для удаления из пула {game} — позже её можно вернуть.",
+    "screen.maps.delete_ph": "Выберите карту для удаления…",
 
     "screen.bans.title": "Баны",
     "screen.bans.desc": "Забаненные игроки не могут записываться на игры этого сервера.",
@@ -542,6 +546,13 @@ STRINGS: dict[str, str] = {
     "draft.complete_value": "Все игроки распределены.",
     "draft.pick_ph": "Выберите игрока…",
 
+    # ------------------------------------------------------- лента этапов ---
+    "flow.phase": "Этап",
+    "flow.coin": "Монета",
+    "flow.draft": "Драфт",
+    "flow.veto": "Вето",
+    "flow.live": "Игра",
+
     # ------------------------------------------------------------ монета ---
     "coin.title": "Жеребьёвка — матч #{match_id}",
     "coin.heads": "Орёл",
@@ -647,6 +658,9 @@ STRINGS: dict[str, str] = {
     "lobby.voice": "Голосовые каналы",
     "lobby.map_line": "**{index}. {map}** — Команда A {side_a} · Команда B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
+    "lobby.map_card": "Карта {index}/{total} — {map}",
+    "lobby.map_card_decider": "Карта {index}/{total} — {map} · решающая",
+    "lobby.map_card_sides": "Команда A {side_a} · Команда B {side_b}",
     "lobby.footer": (
         "Любой участник кастома может задать код. При завершении у "
         "капитана сначала спросят результат."
@@ -717,6 +731,28 @@ STRINGS: dict[str, str] = {
     "profile.role.initiator": "Зачинщик",
     "profile.role.sentinel": "Страж",
     "profile.role.flex": "Флекс",
+    # единая карточка
+    "profile.header_main": "Основная · {mark} {game} · побед в кастомках: {wins}",
+    "profile.header_nomain": "Побед в кастомках: {wins}",
+    "profile.not_linked": "Не привязано",
+    "profile.status.pending": "на проверке",
+    "profile.status.approved": "подтверждён",
+    "profile.status.denied": "отклонён",
+    "profile.val.linked": (
+        "Riot ID: **{riot}** ({status})\n"
+        "Ранг: {rank} · {rr} RR · Пик: {peak}\n"
+        "Роль: {role}"
+    ),
+    "profile.steam.line": "Steam: `{steam}`",
+    "profile.dota.friend": "Friend ID: `{friend}`",
+    # привязка / отвязка / основная игра
+    "profile.link.empty": "Укажите Steam для привязки.",
+    "profile.link.done": "Steam **{steam}** привязан — работает для CS2 и Dota 2.",
+    "profile.unlink.opt.valorant": "Valorant (Riot ID)",
+    "profile.unlink.opt.steam": "Steam (CS2 и Dota 2)",
+    "profile.unlink.nothing": "Здесь нечего отвязывать.",
+    "profile.unlink.done": "Отвязано: **{what}**.",
+    "profile.main.done": "Основная игра: **{game}**.",
 
     # ----------------------------------------------------------- статистика ---
     "stats.none": "Статистики пока нет.",
@@ -816,6 +852,13 @@ STRINGS: dict[str, str] = {
     "cmd.profile.unregister.desc": "Удалить ваш зарегистрированный Riot ID.",
     "cmd.profile.refresh.desc": "Принудительно обновить текущий и пиковый ранг из Riot.",
     "cmd.profile.view.desc": "Посмотреть профиль игрока.",
+    "cmd.link.desc": "Привязать Steam (используется для CS2 и Dota 2).",
+    "cmd.link.steam": "Ваш Steam: ник, ID или ссылка на профиль",
+    "cmd.link.friend": "Dota 2 friend ID в игре (необязательно)",
+    "cmd.unlink.desc": "Удалить привязанную личность из профиля.",
+    "cmd.unlink.what": "Что отвязать",
+    "cmd.setmain.desc": "Указать основную игру — она задаёт акцент карточки профиля.",
+    "cmd.setmain.game": "Ваша основная игра",
 
     "cmd.stats.me.desc": "Ваша статистика.",
     "cmd.stats.leaderboard.desc": "Таблица лидеров по победам.",

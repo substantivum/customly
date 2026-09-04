@@ -8,7 +8,7 @@ from datetime import datetime
 import discord
 from sqlalchemy import select
 
-from bot.core.embeds import DASH, EMBED_COLOR, member_name
+from bot.core.embeds import DASH, EMBED_COLOR, flow_header, game_color, member_name
 from bot.db import SessionLocal
 from bot.db.models import DraftPick, MapVeto, MatchMapSide, MatchPlayer, MatchTeam
 from bot.i18n import t
@@ -38,10 +38,11 @@ class CoinflipController:
     FACES = ("heads", "tails")
 
     def __init__(self, match_id: int, cap_a: int, cap_b: int,
-                 guild: discord.Guild | None = None):
+                 guild: discord.Guild | None = None, game: str = "valorant"):
         self.match_id = match_id
         self.cap_a, self.cap_b = cap_a, cap_b
         self.guild = guild
+        self.game = game
         self.caller_side = random.choice(("A", "B"))
         self.call: str | None = None          # heads|tails
         self.face: str | None = None          # what the coin landed on
@@ -119,8 +120,9 @@ class CoinflipController:
     # ---------------------------------------------------------------- embed ---
     def embed(self) -> discord.Embed:
         e = discord.Embed(
-            title=t("coin.title", match_id=self.match_id), color=EMBED_COLOR
+            title=t("coin.title", match_id=self.match_id), color=game_color(self.game)
         )
+        flow_header(e, self.game, self.match_id, "coin")
         e.add_field(
             name=t("coin.calling"),
             value=f"{member_name(self.guild, self.caller_id)} ({self.caller_side})",
@@ -250,10 +252,12 @@ class DraftController:
         mode: str = "snake",
         first: str = "A",
         guild: discord.Guild | None = None,
+        game: str = "valorant",
     ):
         self.match_id = match_id
         self.cap_a, self.cap_b = cap_a, cap_b
         self.guild = guild
+        self.game = game
         self.pool = list(pool)                      # selectable players
         self.team = {"A": [cap_a], "B": [cap_b]}
         self.mode = mode if mode in draft_svc.DRAFT_MODES else "snake"
@@ -326,8 +330,10 @@ class DraftController:
     def embed(self) -> discord.Embed:
         mode = t("draft.title.snake" if self.mode == "snake" else "draft.title.alternate")
         e = discord.Embed(
-            title=t("draft.title", mode=mode, match_id=self.match_id), color=EMBED_COLOR
+            title=t("draft.title", mode=mode, match_id=self.match_id),
+            color=game_color(self.game),
         )
+        flow_header(e, self.game, self.match_id, "draft")
         e.add_field(
             name=t("common.team_a"),
             value="\n".join(member_name(self.guild, u) for u in self.team["A"]),
@@ -359,6 +365,7 @@ class VetoController:
         self.cap_a, self.cap_b = cap_a, cap_b
         self.guild = guild
         self.game = game
+        self.fmt = fmt
         self.remaining = list(pool)
         self.plan = veto_svc.veto_plan(fmt, len(pool), with_side=games_svc.has_side_choice(game))
         self.step = 0
@@ -486,8 +493,9 @@ class VetoController:
 
     def embed(self) -> discord.Embed:
         e = discord.Embed(
-            title=t("veto.title", match_id=self.match_id), color=EMBED_COLOR
+            title=t("veto.title", match_id=self.match_id), color=game_color(self.game)
         )
+        flow_header(e, self.game, self.match_id, "veto", fmt=self.fmt)
         e.add_field(name=t("veto.remaining"), value=", ".join(self.remaining) or DASH,
                     inline=False)
         if self.picked_maps:

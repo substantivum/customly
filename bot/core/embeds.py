@@ -11,12 +11,91 @@ from bot.i18n import t
 from bot.services.draft import captain_label, draft_mode_label
 from bot.services.games import game_label, has_veto
 
-# The bot's one accent colour. Muted olive: it holds up as an embed's left bar in
-# both Discord themes, where a lighter sand washes out against the dark one.
-EMBED_COLOR = discord.Color.from_str("#6B7A4B")
+# The bot's neutral brand colour, worn by everything that isn't about one
+# specific game: the tier boards, and all server/staff chrome (roles, language,
+# bans, audit). A single game's custom or match wears its game colour instead
+# (see game_color), which is what makes the three games legible at a glance.
+EMBED_COLOR = discord.Color.from_str("#BF3100")
+
+# Per-game accent. Any embed about a single game's custom or match is coloured
+# from here; a board that mixes games keeps EMBED_COLOR and marks each row with
+# game_mark() instead, since an embed has only the one accent bar.
+GAME_COLORS = {
+    "valorant": "#FF4655",
+    "cs2": "#F2A93B",
+    "dota2": "#C1440E",
+}
+
+# A colour-coded square that carries the game into a plain-text line — a board
+# row, an embed title — where the accent bar can't reach. Indicator only, in the
+# same spirit as the state dots.
+GAME_MARK = {
+    "valorant": "🟥",
+    "cs2": "🟨",
+    "dota2": "🟧",
+}
+
+# The run-of-match phases, in order. Dota 2 has no veto (see games.has_veto), so
+# its ribbon drops that node.
+FLOW_PHASES = ("coin", "draft", "veto", "live")
+_PHASE_DONE, _PHASE_NOW, _PHASE_TODO = "🟢", "🔵", "⚪"
 
 # Not a translatable string — a typographic placeholder for "no value".
 DASH = "—"
+
+
+def game_color(game: str | None) -> discord.Color:
+    """The accent for a single-game embed; the neutral brand colour otherwise."""
+    hexv = GAME_COLORS.get(game or "")
+    return discord.Color.from_str(hexv) if hexv else EMBED_COLOR
+
+
+def game_mark(game: str | None) -> str:
+    """A game's indicator square, or empty for an unknown game."""
+    return GAME_MARK.get(game or "", "")
+
+
+def phase_ribbon(current: str, *, has_veto: bool = True) -> str:
+    """`Coin ▸ Draft ▸ Veto ▸ Live` with the current step marked and named.
+
+    Reads the same in every language: the labels come from the catalog, the
+    dots don't. Steps before `current` are done, the rest are pending.
+    """
+    phases = [p for p in FLOW_PHASES if p != "veto" or has_veto]
+    if current not in phases:
+        current = phases[-1]
+    here = phases.index(current)
+    out = []
+    for i, p in enumerate(phases):
+        label = t(f"flow.{p}")
+        if i < here:
+            out.append(f"{_PHASE_DONE} {label}")
+        elif i == here:
+            out.append(f"{_PHASE_NOW} **{label}**")
+        else:
+            out.append(f"{_PHASE_TODO} {label}")
+    return " ▸ ".join(out)
+
+
+def flow_header(
+    e: discord.Embed, game: str, match_id: int, phase: str, *,
+    fmt: str | None = None,
+) -> discord.Embed:
+    """Stamp a run-of-match embed with its context line and phase ribbon.
+
+    The author line ("Match #12 · Valorant · BO3") and the ribbon are the two
+    things every phase shares, so a player always knows which game, which match
+    and how far along it is."""
+    ctx = f"{game_mark(game)} Match #{match_id} · {game_label(game)}"
+    if fmt:
+        ctx += f" · {fmt}"
+    e.set_author(name=ctx)
+    e.add_field(
+        name=t("flow.phase"),
+        value=phase_ribbon(phase, has_veto=has_veto(game)),
+        inline=False,
+    )
+    return e
 
 
 def as_utc(dt: datetime) -> datetime:
@@ -84,9 +163,10 @@ def custom_registration_embed(
     else:
         body = t("custom.reg.body_no_maps", **body_kwargs)
     e = discord.Embed(
-        title=t("custom.reg.title", custom_id=custom.custom_id, name=custom.name),
+        title=f"{game_mark(game)} "
+              + t("custom.reg.title", custom_id=custom.custom_id, name=custom.name),
         description=body,
-        color=EMBED_COLOR,
+        color=game_color(game),
     )
     names = "\n".join(f"• <@{u}>" for u in registered[:SHOW_MAX]) or DASH
     e.add_field(

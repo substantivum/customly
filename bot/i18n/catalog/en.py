@@ -82,6 +82,7 @@ STRINGS: dict[str, str] = {
     "btn.delete": "Delete",
     "btn.seed": "Seed defaults",
     "btn.add_map": "Add map",
+    "btn.remove_map": "Remove map",
     "btn.competitive_pool": "Competitive pool",
     "btn.ban": "Ban",
     "btn.unban": "Unban",
@@ -416,6 +417,9 @@ STRINGS: dict[str, str] = {
     "screen.maps.in_comp": "in the competitive pool",
     "screen.maps.flipped": "**{name}** → {state}",
     "screen.maps.nothing": "Nothing to toggle.",
+    "screen.maps.delete.title": "Remove a map",
+    "screen.maps.delete.desc": "Pick a map to remove from the {game} pool — you can add it back later.",
+    "screen.maps.delete_ph": "Pick a map to remove permanently…",
 
     "screen.bans.title": "Bans",
     "screen.bans.desc": "Banned players can't register for any game in this server.",
@@ -557,6 +561,13 @@ STRINGS: dict[str, str] = {
     "draft.complete_value": "All players drafted.",
     "draft.pick_ph": "Pick a player…",
 
+    # ------------------------------------------------------------ flow ribbon ---
+    "flow.phase": "Phase",
+    "flow.coin": "Coin",
+    "flow.draft": "Draft",
+    "flow.veto": "Veto",
+    "flow.live": "Live",
+
     # ---------------------------------------------------------------- coin ---
     "coin.title": "Coin Toss — Match #{match_id}",
     "coin.heads": "Heads",
@@ -660,6 +671,9 @@ STRINGS: dict[str, str] = {
     "lobby.voice": "Voice",
     "lobby.map_line": "**{index}. {map}** — Team A {side_a} · Team B {side_b}",
     "lobby.map_line_plain": "**{index}. {map}**",
+    "lobby.map_card": "Map {index}/{total} — {map}",
+    "lobby.map_card_decider": "Map {index}/{total} — {map} · decider",
+    "lobby.map_card_sides": "Team A {side_a} · Team B {side_b}",
     "lobby.footer": (
         "Anyone playing this custom can set the code. Ending it asks a "
         "captain for the result first."
@@ -730,6 +744,28 @@ STRINGS: dict[str, str] = {
     "profile.role.initiator": "Initiator",
     "profile.role.sentinel": "Sentinel",
     "profile.role.flex": "Flex",
+    # unified card
+    "profile.header_main": "Main · {mark} {game} · {wins} customs won",
+    "profile.header_nomain": "{wins} customs won",
+    "profile.not_linked": "Not linked",
+    "profile.status.pending": "pending review",
+    "profile.status.approved": "approved",
+    "profile.status.denied": "denied",
+    "profile.val.linked": (
+        "Riot ID: **{riot}** ({status})\n"
+        "Rank: {rank} · {rr} RR · Peak: {peak}\n"
+        "Role: {role}"
+    ),
+    "profile.steam.line": "Steam: `{steam}`",
+    "profile.dota.friend": "Friend ID: `{friend}`",
+    # link / unlink / setmain
+    "profile.link.empty": "Give a Steam handle to link.",
+    "profile.link.done": "Linked Steam **{steam}** — it covers CS2 and Dota 2.",
+    "profile.unlink.opt.valorant": "Valorant (Riot ID)",
+    "profile.unlink.opt.steam": "Steam (CS2 & Dota 2)",
+    "profile.unlink.nothing": "Nothing linked there to remove.",
+    "profile.unlink.done": "Unlinked **{what}**.",
+    "profile.main.done": "Main game set to **{game}**.",
 
     # --------------------------------------------------------------- stats ---
     "stats.none": "No stats yet.",
@@ -839,6 +875,13 @@ STRINGS: dict[str, str] = {
     "cmd.profile.unregister.desc": "Remove your registered Riot ID.",
     "cmd.profile.refresh.desc": "Force-refresh your current and peak rank from Riot.",
     "cmd.profile.view.desc": "View a player's profile.",
+    "cmd.link.desc": "Link your Steam handle (used for CS2 and Dota 2).",
+    "cmd.link.steam": "Your Steam handle, ID, or profile URL",
+    "cmd.link.friend": "Optional Dota 2 in-game friend ID",
+    "cmd.unlink.desc": "Remove a linked identity from your profile.",
+    "cmd.unlink.what": "Which identity to unlink",
+    "cmd.setmain.desc": "Set your main game — it accents your profile card.",
+    "cmd.setmain.game": "Your main game",
 
     "cmd.stats.me.desc": "Your stats.",
     "cmd.stats.leaderboard.desc": "Wins leaderboard.",
