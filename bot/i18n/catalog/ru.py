@@ -789,15 +789,17 @@ STRINGS: dict[str, str] = {
         "Роль: {role}"
     ),
     "profile.steam.line": "Steam: `{steam}`",
+    "profile.steam.link": "[Steam]({url})",
     "profile.dota.friend": "Friend ID: `{friend}`",
     # CS2 (Faceit)
-    "profile.cs2.linked": "Faceit: **{nick}**{status}",
+    "profile.cs2.linked": "Faceit: [**{nick}**]({url}){status}",
     "profile.cs2.rank": "Уровень {level} · {elo} elo",
     "profile.cs2.empty": "Укажите ваш ник Faceit для регистрации.",
     "profile.cs2.pending": "Faceit **{nick}** отправлен на проверку админу.",
     "profile.cs2.unchanged": "По-прежнему **{nick}** — статус проверки не изменился.",
     # Dota 2 (OpenDota)
-    "profile.dota.linked": "Friend ID: `{friend}`{status}",
+    "profile.dota.linked": "Friend ID: [{friend}]({url}){status}",
+    "profile.dota.linked_plain": "Friend ID: `{friend}`{status}",
     "profile.dota.rank": "Ранг: {rank}",
     "profile.dota.unranked": "Без ранга",
     "profile.dota.pending": "Friend id **{friend}** отправлен на проверку админу.",
@@ -932,8 +934,13 @@ STRINGS: dict[str, str] = {
 
     # -------------------------------------------------------------- помощь ---
     "help.title": "\U0001f4d6 Гид по командам Customly",
-    "help.desc": "Всё, что вы можете сделать, по разделам — пункты для "
-                 "админов/суперадминов видны только тем, у кого есть эта роль.",
+    "help.desc": (
+        "Customly ведёт кастомки по **Valorant, CS2 и Dota 2**. Всё, что вы "
+        "можете сделать, по разделам — пункты для админов видны только тем, у "
+        "кого есть эта роль. Зарегистрируйте свои игры в разделе "
+        "**Профиль и ранг**, чтобы ранг был виден в профиле и учитывался при "
+        "выборе капитанов."
+    ),
     "help.section.customs": "\U0001f3ae Кастомы",
     "help.section.match": "⚔️ Матч",
     "help.section.queue": "\U0001f4cb Очередь",

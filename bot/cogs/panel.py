@@ -381,7 +381,7 @@ class CreateScreen(_Gated):
         e = discord.Embed(
             title=t("screen.create.title"),
             description=t("screen.create.desc"),
-            color=EMBED_COLOR,
+            color=game_color(self.game),
         )
         e.add_field(name=t("common.game"), value=games_svc.game_label(self.game), inline=True)
         if has_veto:
@@ -798,7 +798,7 @@ class MapsScreen(_Gated):
 
     async def embed(self) -> discord.Embed:
         self._maps = await maps_svc.all_maps(self.guild_id, self.game)
-        e = discord.Embed(title=t("board.map_pool"), color=EMBED_COLOR)
+        e = discord.Embed(title=t("board.map_pool"), color=game_color(self.game))
         e.add_field(name=t("common.game"), value=games_svc.game_label(self.game), inline=False)
         if not self._maps:
             e.description = t("screen.maps.empty")

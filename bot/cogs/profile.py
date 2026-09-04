@@ -24,7 +24,7 @@ from bot.i18n.translator import L
 from bot.services import faceit
 from bot.services import games as games_svc
 from bot.services import henrik, opendota, rank_sync
-from bot.services.identity import normalize_tag
+from bot.services.identity import faceit_url, normalize_tag, opendota_url, steam_url
 
 log = logging.getLogger("customly.profile")
 
@@ -71,10 +71,20 @@ def _valorant_value(u: User) -> str:
     )
 
 
+def _steam_value(u: User) -> str:
+    """The Steam handle as a clickable "Steam" link, or plain text if the handle
+    isn't something a profile URL can be built from."""
+    if not u.steam_id:
+        return t("profile.not_linked")
+    url = steam_url(u.steam_id)
+    return t("profile.steam.link", url=url) if url else t("profile.steam.line", steam=u.steam_id)
+
+
 def _cs2_value(u: User) -> str:
     if not u.cs2_nick:
-        return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
-    line = t("profile.cs2.linked", nick=u.cs2_nick, status=_status_suffix(u.cs2_status))
+        return _steam_value(u)
+    line = t("profile.cs2.linked", nick=u.cs2_nick, url=faceit_url(u.cs2_nick),
+             status=_status_suffix(u.cs2_status))
     if u.cs2_status == "approved":
         line += "\n" + t(
             "profile.cs2.rank",
@@ -86,9 +96,12 @@ def _cs2_value(u: User) -> str:
 
 def _dota_value(u: User) -> str:
     if not u.dota_friend_id:
-        return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
-    line = t("profile.dota.linked", friend=u.dota_friend_id,
-             status=_status_suffix(u.dota_status))
+        return _steam_value(u)
+    url = opendota_url(u.dota_friend_id)
+    line = (t("profile.dota.linked", friend=u.dota_friend_id, url=url,
+              status=_status_suffix(u.dota_status)) if url
+            else t("profile.dota.linked_plain", friend=u.dota_friend_id,
+                   status=_status_suffix(u.dota_status)))
     if u.dota_status == "approved":
         medal = opendota.dota_rank_name(u.dota_rank_tier, u.dota_leaderboard)
         line += "\n" + t("profile.dota.rank", rank=medal or t("profile.dota.unranked"))

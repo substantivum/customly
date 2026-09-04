@@ -1025,7 +1025,8 @@ async def start_ready_check(
         raise BotError(t("error.ready_even", n=n))
 
     deadline = datetime.now(timezone.utc) + timedelta(seconds=settings.ready_check_seconds)
-    ctl = ReadyCheckController(custom_id, c.name, r.starters, deadline, round_no, guild=guild)
+    ctl = ReadyCheckController(custom_id, c.name, r.starters, deadline, round_no,
+                               guild=guild, game=c.game)
     view = ReadyCheckView(ctl, None)
 
     @flow_step(channel, "the match")

@@ -801,15 +801,17 @@ STRINGS: dict[str, str] = {
         "Role: {role}"
     ),
     "profile.steam.line": "Steam: `{steam}`",
+    "profile.steam.link": "[Steam]({url})",
     "profile.dota.friend": "Friend ID: `{friend}`",
     # CS2 (Faceit)
-    "profile.cs2.linked": "Faceit: **{nick}**{status}",
+    "profile.cs2.linked": "Faceit: [**{nick}**]({url}){status}",
     "profile.cs2.rank": "Level {level} · {elo} elo",
     "profile.cs2.empty": "Give your Faceit nickname to register.",
     "profile.cs2.pending": "Submitted Faceit **{nick}** — pending an admin's approval.",
     "profile.cs2.unchanged": "Still **{nick}** — no change to your review status.",
     # Dota 2 (OpenDota)
-    "profile.dota.linked": "Friend ID: `{friend}`{status}",
+    "profile.dota.linked": "Friend ID: [{friend}]({url}){status}",
+    "profile.dota.linked_plain": "Friend ID: `{friend}`{status}",
     "profile.dota.rank": "Rank: {rank}",
     "profile.dota.unranked": "Unranked",
     "profile.dota.pending": "Submitted friend id **{friend}** — pending an admin's approval.",
@@ -954,8 +956,12 @@ STRINGS: dict[str, str] = {
 
     # ---------------------------------------------------------------- help ---
     "help.title": "\U0001f4d6 Customly Command Guide",
-    "help.desc": "Everything you can do, grouped by area — grant/admin-only "
-                 "entries only show up if you hold that role.",
+    "help.desc": (
+        "Customly runs customs in **Valorant, CS2 and Dota 2**. Everything you "
+        "can do, grouped by area — admin-only entries only show up if you hold "
+        "that role. Register your game identities under **Profile & Rank** so "
+        "your rank shows on your profile and counts when captains are picked."
+    ),
     "help.section.customs": "\U0001f3ae Customs",
     "help.section.match": "⚔️ Match",
     "help.section.queue": "\U0001f4cb Queue",

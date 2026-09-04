@@ -8,7 +8,7 @@ from datetime import datetime
 import discord
 from sqlalchemy import select
 
-from bot.core.embeds import DASH, EMBED_COLOR, flow_header, game_color, member_name
+from bot.core.embeds import DASH, flow_header, game_color, game_mark, member_name
 from bot.db import SessionLocal
 from bot.db.models import DraftPick, MapVeto, MatchMapSide, MatchPlayer, MatchTeam
 from bot.i18n import t
@@ -172,13 +172,14 @@ class ReadyCheckController:
 
     def __init__(self, custom_id: int, name: str, starters: list[int],
                  deadline: datetime, round_no: int = 1,
-                 guild: discord.Guild | None = None):
+                 guild: discord.Guild | None = None, game: str = "valorant"):
         self.custom_id = custom_id
         self.name = name
         self.starters = list(starters)
         self.deadline = deadline
         self.round_no = round_no
         self.guild = guild
+        self.game = game
         self.ready: set[int] = set()
         self.declined: set[int] = set()
 
@@ -225,12 +226,13 @@ class ReadyCheckController:
 
     def embed(self, *, outcome: str | None = None) -> discord.Embed:
         e = discord.Embed(
-            title=t("ready.title", custom_id=self.custom_id, name=self.name),
+            title=f"{game_mark(self.game)} "
+                  + t("ready.title", custom_id=self.custom_id, name=self.name),
             description=(
                 outcome
                 or t("ready.desc", when=discord.utils.format_dt(self.deadline, "R"))
             ),
-            color=EMBED_COLOR,
+            color=game_color(self.game),
         )
         if self.round_no > 1:
             e.title += t("ready.round", n=self.round_no)
