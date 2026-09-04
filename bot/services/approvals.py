@@ -59,6 +59,15 @@ async def list_pending() -> list[Pending]:
         return out
 
 
+async def pending_counts() -> dict[str, int]:
+    """Pending submissions per game, in GAMES order, zeros left out — what the
+    staff boards show next to the Rank-approvals button."""
+    counts: dict[str, int] = {}
+    for p in await list_pending():
+        counts[p.game] = counts.get(p.game, 0) + 1
+    return {g: counts[g] for g in GAMES if counts.get(g)}
+
+
 async def resolve(user_id: int, game: str, reviewer_id: int, *, approve: bool) -> User | None:
     """None if that game wasn't pending any more (already reviewed, or gone)."""
     if game not in _FIELDS:

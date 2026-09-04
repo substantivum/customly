@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.core import board
 from bot.core.embeds import DASH, EMBED_COLOR, game_color, game_mark
 from bot.core.errors import BotError
 from bot.core.ui import reply
@@ -167,6 +168,8 @@ class ProfileCog(commands.Cog):
                 u.main_role = main_role.value
             await s.commit()
         log.info("register: user %s submitted %s (resubmit=%s)", itx.user.id, canonical, resubmit)
+        if resubmit:
+            board.schedule(itx.guild)  # the staff boards count pending approvals
         msg_key = "profile.register.pending" if resubmit else "profile.register.unchanged"
         await reply(itx, t(msg_key, tag=canonical))
 
@@ -202,6 +205,8 @@ class ProfileCog(commands.Cog):
             await s.commit()
         log.info("register_cs2: user %s submitted %s (resubmit=%s)",
                  itx.user.id, player.nickname, resubmit)
+        if resubmit:
+            board.schedule(itx.guild)  # the staff boards count pending approvals
         msg_key = "profile.cs2.pending" if resubmit else "profile.cs2.unchanged"
         await reply(itx, t(msg_key, nick=player.nickname))
 
@@ -234,6 +239,8 @@ class ProfileCog(commands.Cog):
                 u.dota_rank_tier = u.dota_leaderboard = u.dota_updated_at = None
             await s.commit()
         log.info("register_dota: user %s submitted %s (resubmit=%s)", itx.user.id, raw, resubmit)
+        if resubmit:
+            board.schedule(itx.guild)  # the staff boards count pending approvals
         msg_key = "profile.dota.pending" if resubmit else "profile.dota.unchanged"
         await reply(itx, t(msg_key, friend=raw))
 

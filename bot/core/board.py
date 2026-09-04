@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.core.embeds import DASH, EMBED_COLOR, game_mark, member_name, start_text
+from bot.services import approvals as appr_svc
 from bot.services import games as games_svc
 from bot.db import SessionLocal
 from bot.db.models import Ban, Custom, MemberRole
@@ -113,6 +114,17 @@ async def customs_field(
 
 
 # ------------------------------------------------------------------- embeds ---
+async def _approvals_value() -> str:
+    """`**3** pending — 🟥 2 · 🟨 1`, or a quiet "none" — the queue behind the
+    Rank-approvals button, so staff see work waiting without opening it."""
+    counts = await appr_svc.pending_counts()
+    total = sum(counts.values())
+    if not total:
+        return t("board.approvals_none")
+    by_game = " · ".join(f"{game_mark(g)} {n}" for g, n in counts.items())
+    return t("board.approvals_pending", n=total, by_game=by_game)
+
+
 def _stamp(e: discord.Embed, note: str) -> discord.Embed:
     e.timestamp = datetime.now(timezone.utc)
     e.set_footer(text=note)
@@ -173,6 +185,7 @@ async def admin_embed(guild: discord.Guild) -> discord.Embed:
         value="\n".join(comp_lines) if comp_lines else DASH,
         inline=False,
     )
+    e.add_field(name=t("board.approvals"), value=await _approvals_value(), inline=False)
     return _stamp(e, t("board.footer.staff"))
 
 
@@ -224,6 +237,7 @@ async def super_embed(guild: discord.Guild) -> discord.Embed:
                 inline=False)
     e.add_field(name=t("board.superadmins"),
                 value=_role_line(guild, settings.superadmin_role, supers), inline=False)
+    e.add_field(name=t("board.approvals"), value=await _approvals_value(), inline=False)
     e.add_field(name=t("board.banned"), value=str(bans), inline=True)
     e.add_field(name=t("board.config"), value=_config_summary(), inline=True)
     e.add_field(
