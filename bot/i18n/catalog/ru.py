@@ -61,7 +61,7 @@ STRINGS: dict[str, str] = {
     "btn.manage_any": "Любой кастом",
     "btn.maps": "Карты",
     "btn.bans": "Баны",
-    "btn.riot_approvals": "Проверка Riot ID",
+    "btn.riot_approvals": "Проверка рангов",
     "btn.approve": "Одобрить",
     "btn.deny": "Отклонить",
     "btn.audit": "Журнал",
@@ -149,6 +149,22 @@ STRINGS: dict[str, str] = {
     "error.riot_rate_limited": "Сервис рангов сейчас перегружен — попробуйте через минуту.",
     "error.riot_timeout": "Сервис рангов не ответил вовремя — попробуйте чуть позже.",
     "error.riot_unavailable": "Не удалось связаться с сервисом рангов — попробуйте позже.",
+    "error.faceit_unconfigured": (
+        "Ранг CS2 на этом сервере ещё не настроен (нет ключа Faceit API). "
+        "Обратитесь к админу."
+    ),
+    "error.faceit_not_found": "Игрока Faceit CS2 с ником `{nick}` не найдено — проверьте написание.",
+    "error.faceit_rate_limited": "Faceit сейчас занят — попробуйте через минуту.",
+    "error.faceit_timeout": "Faceit не ответил вовремя — попробуйте ещё раз.",
+    "error.faceit_unavailable": "Не удалось связаться с Faceit — попробуйте позже.",
+    "error.dota_bad_id": "Dota 2 friend id — это число, ваш внутриигровой Friend ID.",
+    "error.dota_not_found": (
+        "Нет открытого профиля Dota 2 для friend id `{friend}` — откройте историю "
+        "матчей (Настройки → Соцсети) и попробуйте снова."
+    ),
+    "error.dota_rate_limited": "OpenDota сейчас занят — попробуйте через минуту.",
+    "error.dota_timeout": "OpenDota не ответил вовремя — попробуйте ещё раз.",
+    "error.dota_unavailable": "Не удалось связаться с OpenDota — попробуйте позже.",
     "error.flow_step": (
         "⚠️ Не удалось перейти к этапу «{what}» — `{error}`.\n"
         "Попросите админа завершить кастом и запустить его заново "
@@ -427,6 +443,17 @@ STRINGS: dict[str, str] = {
     "screen.riot_approvals.pick": "Выберите заявку для проверки",
     "screen.riot_approvals.more": "_…и ещё {n}._",
 
+    "screen.rank_approvals.title": "Проверка рангов",
+    "screen.rank_approvals.desc": (
+        "Одобрите поданную личность — Riot ID, ник Faceit или Dota friend id — "
+        "прежде чем её ранг начнёт учитываться. Владение нельзя проверить "
+        "автоматически, поэтому убедитесь, что это действительно они."
+    ),
+    "screen.rank_approvals.count": "На проверке ({n})",
+    "screen.rank_approvals.pick": "Выберите заявку для проверки…",
+    "screen.rank_approvals.more": "_…и ещё {n}._",
+    "screen.rank_approvals.line": "{mark} {member} — `{identity}`",
+
     "screen.audit.title": "Журнал действий",
     "screen.audit.empty": "_Записей пока нет._",
     "screen.audit.footer": "15 последних записей",
@@ -502,6 +529,17 @@ STRINGS: dict[str, str] = {
     "riot.dm.denied": (
         "Ваш Riot ID **{tag}** отклонён на сервере **{guild}**. Запустите "
         "/register с правильным Riot ID, чтобы попробовать снова."
+    ),
+    "rank_approvals.approved": "Личность {member} для {game} одобрена.",
+    "rank_approvals.denied": "Личность {member} для {game} отклонена.",
+    "rank_approvals.gone": "Эта заявка уже была рассмотрена.",
+    "rank.dm.approved": (
+        "Ваша личность {game} **{identity}** одобрена на сервере **{guild}** — "
+        "теперь ваш ранг учитывается и виден в профиле."
+    ),
+    "rank.dm.denied": (
+        "Ваша личность {game} **{identity}** отклонена на сервере **{guild}**. "
+        "Подайте заявку заново с правильными данными."
     ),
 
     "roles.granted": "Роль **{role}** выдана: {member}.",
@@ -719,8 +757,9 @@ STRINGS: dict[str, str] = {
         "Ваш Riot ID удалён из профиля. Используйте `/register` в любое "
         "время, чтобы подтвердить его заново."
     ),
-    "profile.refresh.not_approved": "Ваш Riot ID ещё не одобрен — обновлять нечего.",
+    "profile.refresh.not_approved": "У вас ещё нет одобренной личности — обновлять нечего.",
     "profile.refresh.done": "Ранг обновлён: **{rank}** ({rr} RR), пик — **{peak}**.",
+    "profile.refresh.done_all": "Ранги обновлены — смотрите **/profile**.",
     "profile.refresh.failed": "Не удалось связаться с серверами Riot — попробуйте позже.",
     "profile.title": "Профиль — {name}",
     "profile.riot_id": "Riot ID",
@@ -748,11 +787,25 @@ STRINGS: dict[str, str] = {
     ),
     "profile.steam.line": "Steam: `{steam}`",
     "profile.dota.friend": "Friend ID: `{friend}`",
+    # CS2 (Faceit)
+    "profile.cs2.linked": "Faceit: **{nick}** ({status})",
+    "profile.cs2.rank": "Уровень {level} · {elo} elo",
+    "profile.cs2.empty": "Укажите ваш ник Faceit для регистрации.",
+    "profile.cs2.pending": "Faceit **{nick}** отправлен на проверку админу.",
+    "profile.cs2.unchanged": "По-прежнему **{nick}** — статус проверки не изменился.",
+    # Dota 2 (OpenDota)
+    "profile.dota.linked": "Friend ID: `{friend}` ({status})",
+    "profile.dota.rank": "Ранг: {rank}",
+    "profile.dota.unranked": "Без ранга",
+    "profile.dota.pending": "Friend id **{friend}** отправлен на проверку админу.",
+    "profile.dota.unchanged": "По-прежнему **{friend}** — статус проверки не изменился.",
     # привязка / отвязка / основная игра
     "profile.link.empty": "Укажите Steam для привязки.",
-    "profile.link.done": "Steam **{steam}** привязан — работает для CS2 и Dota 2.",
+    "profile.link.done": "Steam **{steam}** привязан.",
     "profile.unlink.opt.valorant": "Valorant (Riot ID)",
-    "profile.unlink.opt.steam": "Steam (CS2 и Dota 2)",
+    "profile.unlink.opt.cs2": "CS2 (Faceit)",
+    "profile.unlink.opt.dota": "Dota 2 (friend id)",
+    "profile.unlink.opt.steam": "Steam",
     "profile.unlink.nothing": "Здесь нечего отвязывать.",
     "profile.unlink.done": "Отвязано: **{what}**.",
     "profile.main.done": "Основная игра: **{game}**.",
@@ -853,9 +906,13 @@ STRINGS: dict[str, str] = {
     "cmd.profile.register.riot_id": "Ваш Riot ID, например TenZ#NA1",
     "cmd.profile.register.main_role": "Предпочитаемая роль (необязательно)",
     "cmd.profile.unregister.desc": "Удалить ваш зарегистрированный Riot ID.",
-    "cmd.profile.refresh.desc": "Принудительно обновить текущий и пиковый ранг из Riot.",
+    "cmd.profile.refresh.desc": "Обновить ранги во всех играх, где вы одобрены.",
     "cmd.profile.view.desc": "Посмотреть профиль игрока.",
-    "cmd.link.desc": "Привязать Steam (используется для CS2 и Dota 2).",
+    "cmd.register_cs2.desc": "Зарегистрировать ник CS2 Faceit — с проверкой админом.",
+    "cmd.register_cs2.nick": "Ваш ник Faceit",
+    "cmd.register_dota.desc": "Зарегистрировать Dota 2 friend id — с проверкой админом.",
+    "cmd.register_dota.friend": "Ваш внутриигровой Dota 2 Friend ID (число)",
+    "cmd.link.desc": "Привязать косметический Steam-хендл к профилю.",
     "cmd.link.steam": "Ваш Steam: ник, ID или ссылка на профиль",
     "cmd.link.friend": "Dota 2 friend ID в игре (необязательно)",
     "cmd.unlink.desc": "Удалить привязанную личность из профиля.",

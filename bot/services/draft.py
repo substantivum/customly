@@ -14,8 +14,25 @@ CaptainMethod = str  # random|manual|highest_rr|highest_peak|highest_wins_peak|h
 RANK_METHODS = ("highest_rr", "highest_peak", "highest_wins_peak", "highest_wins_rr")
 
 
+# Player metas carry game-agnostic numeric scores (`cur_score`/`peak_score`,
+# filled by rank_sync.captain_metrics) so a CS2 or Dota custom ranks captains by
+# its own metric. The Valorant-era `cur_rr`/`peak_rank` fields are still honoured
+# as a fallback, which is what keeps the unit tests (and any old caller) working.
 def _peak_val(p: dict) -> int:
+    if p.get("peak_score") is not None:
+        return p["peak_score"]
     return ranks.rank_value(p.get("peak_rank"))
+
+
+def _cur_val(p: dict) -> int:
+    if p.get("cur_score") is not None:
+        return p["cur_score"]
+    cur = p.get("cur_rr")
+    return cur if cur is not None else -1
+
+
+def _has_cur(p: dict) -> bool:
+    return p.get("cur_score") is not None or p.get("cur_rr") is not None
 
 
 def _wins_val(p: dict) -> int:
@@ -32,9 +49,9 @@ def has_enough_rank_data(method: CaptainMethod, players: list[dict]) -> bool:
     ties, which is expected behavior for a wins-based ranking, not broken
     data. Every other method doesn't consume rank data at all."""
     if method == "highest_peak":
-        return sum(1 for p in players if p.get("peak_rank")) >= 2
+        return sum(1 for p in players if _peak_val(p) > 0) >= 2
     if method == "highest_rr":
-        return sum(1 for p in players if p.get("cur_rr") is not None) >= 2
+        return sum(1 for p in players if _has_cur(p)) >= 2
     return True
 
 
@@ -112,7 +129,7 @@ def choose_captains(
         a, b = random.sample(ids, 2)
         return a, b
     if method == "highest_rr":
-        ranked = ranks.shuffled_by_key(players, key=lambda p: p.get("cur_rr") or -1)
+        ranked = ranks.shuffled_by_key(players, key=_cur_val)
         return ranked[0]["user_id"], ranked[1]["user_id"]
     if method == "highest_peak":
         ranked = ranks.shuffled_by_key(players, key=_peak_val)
@@ -122,7 +139,7 @@ def choose_captains(
         return ranked[0]["user_id"], ranked[1]["user_id"]
     if method == "highest_wins_rr":
         ranked = ranks.shuffled_by_key(
-            players, key=lambda p: (_wins_val(p), p.get("cur_rr") or -1)
+            players, key=lambda p: (_wins_val(p), _cur_val(p))
         )
         return ranked[0]["user_id"], ranked[1]["user_id"]
     if method == "volunteer":

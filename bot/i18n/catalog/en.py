@@ -68,7 +68,7 @@ STRINGS: dict[str, str] = {
     "btn.manage_any": "Manage any custom",
     "btn.maps": "Maps",
     "btn.bans": "Bans",
-    "btn.riot_approvals": "Riot ID Approvals",
+    "btn.riot_approvals": "Rank approvals",
     "btn.approve": "Approve",
     "btn.deny": "Deny",
     "btn.audit": "Audit",
@@ -156,6 +156,21 @@ STRINGS: dict[str, str] = {
     "error.riot_rate_limited": "The rank service is busy right now — try again in a minute.",
     "error.riot_timeout": "The rank service didn't respond in time — try again shortly.",
     "error.riot_unavailable": "Couldn't reach the rank service right now — try again later.",
+    "error.faceit_unconfigured": (
+        "CS2 rank isn't set up on this server yet (no Faceit API key). Ask an admin."
+    ),
+    "error.faceit_not_found": "No Faceit CS2 player called `{nick}` — check the spelling.",
+    "error.faceit_rate_limited": "Faceit is busy right now — try again in a minute.",
+    "error.faceit_timeout": "Faceit didn't respond in time — try again shortly.",
+    "error.faceit_unavailable": "Couldn't reach Faceit right now — try again later.",
+    "error.dota_bad_id": "A Dota 2 friend id is a number — your in-game Friend ID.",
+    "error.dota_not_found": (
+        "No public Dota 2 profile for friend id `{friend}` — make your match data "
+        "public (Settings → Social) and try again."
+    ),
+    "error.dota_rate_limited": "OpenDota is busy right now — try again in a minute.",
+    "error.dota_timeout": "OpenDota didn't respond in time — try again shortly.",
+    "error.dota_unavailable": "Couldn't reach OpenDota right now — try again later.",
     "error.flow_step": (
         "⚠️ Couldn't continue to **{what}** — `{error}`.\n"
         "Ask an admin to end this custom and start it again "
@@ -440,6 +455,17 @@ STRINGS: dict[str, str] = {
     "screen.riot_approvals.pick": "Pick a submission to review",
     "screen.riot_approvals.more": "_…and {n} more._",
 
+    "screen.rank_approvals.title": "Rank approvals",
+    "screen.rank_approvals.desc": (
+        "Approve a submitted identity — Riot ID, Faceit nickname or Dota friend "
+        "id — before its rank counts. Nobody can auto-prove ownership, so confirm "
+        "it's really them."
+    ),
+    "screen.rank_approvals.count": "Pending ({n})",
+    "screen.rank_approvals.pick": "Pick a submission to review…",
+    "screen.rank_approvals.more": "_…and {n} more._",
+    "screen.rank_approvals.line": "{mark} {member} — `{identity}`",
+
     "screen.audit.title": "Audit log",
     "screen.audit.empty": "_No audit entries yet._",
     "screen.audit.footer": "15 most recent entries",
@@ -515,6 +541,17 @@ STRINGS: dict[str, str] = {
     "riot.dm.denied": (
         "Your Riot ID **{tag}** was denied on **{guild}**. Re-run /register "
         "with the correct Riot ID to try again."
+    ),
+    "rank_approvals.approved": "Approved {member}'s {game} identity.",
+    "rank_approvals.denied": "Denied {member}'s {game} identity.",
+    "rank_approvals.gone": "That submission was already reviewed.",
+    "rank.dm.approved": (
+        "Your {game} identity **{identity}** was approved on **{guild}** — your "
+        "rank now counts and shows on your profile."
+    ),
+    "rank.dm.denied": (
+        "Your {game} identity **{identity}** was denied on **{guild}**. "
+        "Re-submit with the correct details to try again."
     ),
 
     # --------------------------------------------------------------- roles ---
@@ -732,8 +769,9 @@ STRINGS: dict[str, str] = {
         "Your Riot ID has been unregistered. Run `/register` again anytime "
         "to re-verify."
     ),
-    "profile.refresh.not_approved": "Your Riot ID isn't approved yet — nothing to refresh.",
+    "profile.refresh.not_approved": "You have no approved identity yet — nothing to refresh.",
     "profile.refresh.done": "Rank updated: **{rank}** ({rr} RR), peak **{peak}**.",
+    "profile.refresh.done_all": "Ranks refreshed — check **/profile**.",
     "profile.refresh.failed": "Couldn't reach Riot's servers just now — try again in a bit.",
     "profile.title": "Profile — {name}",
     "profile.riot_id": "Riot ID",
@@ -761,11 +799,25 @@ STRINGS: dict[str, str] = {
     ),
     "profile.steam.line": "Steam: `{steam}`",
     "profile.dota.friend": "Friend ID: `{friend}`",
+    # CS2 (Faceit)
+    "profile.cs2.linked": "Faceit: **{nick}** ({status})",
+    "profile.cs2.rank": "Level {level} · {elo} elo",
+    "profile.cs2.empty": "Give your Faceit nickname to register.",
+    "profile.cs2.pending": "Submitted Faceit **{nick}** — pending an admin's approval.",
+    "profile.cs2.unchanged": "Still **{nick}** — no change to your review status.",
+    # Dota 2 (OpenDota)
+    "profile.dota.linked": "Friend ID: `{friend}` ({status})",
+    "profile.dota.rank": "Rank: {rank}",
+    "profile.dota.unranked": "Unranked",
+    "profile.dota.pending": "Submitted friend id **{friend}** — pending an admin's approval.",
+    "profile.dota.unchanged": "Still **{friend}** — no change to your review status.",
     # link / unlink / setmain
     "profile.link.empty": "Give a Steam handle to link.",
-    "profile.link.done": "Linked Steam **{steam}** — it covers CS2 and Dota 2.",
+    "profile.link.done": "Linked Steam **{steam}**.",
     "profile.unlink.opt.valorant": "Valorant (Riot ID)",
-    "profile.unlink.opt.steam": "Steam (CS2 & Dota 2)",
+    "profile.unlink.opt.cs2": "CS2 (Faceit)",
+    "profile.unlink.opt.dota": "Dota 2 (friend id)",
+    "profile.unlink.opt.steam": "Steam handle",
     "profile.unlink.nothing": "Nothing linked there to remove.",
     "profile.unlink.done": "Unlinked **{what}**.",
     "profile.main.done": "Main game set to **{game}**.",
@@ -876,9 +928,13 @@ STRINGS: dict[str, str] = {
     "cmd.profile.register.riot_id": "Your Riot ID like TenZ#NA1",
     "cmd.profile.register.main_role": "Optional preferred role",
     "cmd.profile.unregister.desc": "Remove your registered Riot ID.",
-    "cmd.profile.refresh.desc": "Force-refresh your current and peak rank from Riot.",
+    "cmd.profile.refresh.desc": "Force-refresh your ranks from every game you're approved in.",
     "cmd.profile.view.desc": "View a player's profile.",
-    "cmd.link.desc": "Link your Steam handle (used for CS2 and Dota 2).",
+    "cmd.register_cs2.desc": "Register your CS2 Faceit nickname — pending admin approval.",
+    "cmd.register_cs2.nick": "Your Faceit nickname",
+    "cmd.register_dota.desc": "Register your Dota 2 friend id — pending admin approval.",
+    "cmd.register_dota.friend": "Your Dota 2 in-game Friend ID (a number)",
+    "cmd.link.desc": "Link a cosmetic Steam handle to your profile.",
     "cmd.link.steam": "Your Steam handle, ID, or profile URL",
     "cmd.link.friend": "Optional Dota 2 in-game friend ID",
     "cmd.unlink.desc": "Remove a linked identity from your profile.",

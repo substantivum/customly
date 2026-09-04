@@ -1,9 +1,9 @@
 """Player profile commands.
 
-One profile, a section per game: Valorant keeps the Riot ID + rank/role it
-always had (the only game with an API wired up), while CS2 and Dota 2 hold a
-Steam handle the player links themselves. The card's accent follows the
-player's main game, if they've set one.
+One profile, a section per game. Each game that has a rank API works the same
+way: submit an identity → an admin approves it → the rank is fetched and kept
+fresh. Valorant uses HenrikDev (Riot ID), CS2 uses Faceit (nickname), Dota 2
+uses OpenDota (friend id). Steam is a cosmetic handle with no rank attached.
 """
 from __future__ import annotations
 
@@ -20,16 +20,15 @@ from bot.db import SessionLocal
 from bot.db.models import MemberRole, User
 from bot.i18n import t
 from bot.i18n.translator import L
+from bot.services import faceit
 from bot.services import games as games_svc
-from bot.services import henrik, rank_sync
+from bot.services import henrik, opendota, rank_sync
 from bot.services.identity import normalize_tag
 
 log = logging.getLogger("customly.profile")
 
 ROLES = ["Duelist", "Controller", "Initiator", "Sentinel", "Flex"]
 
-# Game choices, lazily labelled (labels are resolved per-interaction, not at
-# import, before the guild's language is known).
 _GAME_CHOICES = [
     app_commands.Choice(name=L(games_svc.GAME_KEY[g]), value=g)
     for g in games_svc.GAMES
@@ -48,14 +47,18 @@ async def _ensure_player(s, guild_id: int, user_id: int) -> User:
     return u
 
 
+def _status(status: str | None) -> str:
+    return t(f"profile.status.{status}") if status else DASH
+
+
+# --------------------------------------------------------- per-game values ----
 def _valorant_value(u: User) -> str:
     if not u.riot_id:
         return t("profile.not_linked")
     approved = u.riot_status == "approved"
     return t(
         "profile.val.linked",
-        riot=u.riot_id,
-        status=t(f"profile.status.{u.riot_status}") if u.riot_status else DASH,
+        riot=u.riot_id, status=_status(u.riot_status),
         rank=(u.cur_rank or DASH) if approved else DASH,
         rr=(str(u.cur_rr) if u.cur_rr is not None else DASH) if approved else DASH,
         peak=(u.peak_rank or DASH) if approved else DASH,
@@ -63,12 +66,26 @@ def _valorant_value(u: User) -> str:
     )
 
 
-def _steam_value(u: User, *, with_friend: bool) -> str:
-    if not u.steam_id:
-        return t("profile.not_linked")
-    line = t("profile.steam.line", steam=u.steam_id)
-    if with_friend and u.dota_friend_id:
-        line += "\n" + t("profile.dota.friend", friend=u.dota_friend_id)
+def _cs2_value(u: User) -> str:
+    if not u.cs2_nick:
+        return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
+    line = t("profile.cs2.linked", nick=u.cs2_nick, status=_status(u.cs2_status))
+    if u.cs2_status == "approved":
+        line += "\n" + t(
+            "profile.cs2.rank",
+            level=str(u.cs2_level) if u.cs2_level is not None else DASH,
+            elo=str(u.cs2_elo) if u.cs2_elo is not None else DASH,
+        )
+    return line
+
+
+def _dota_value(u: User) -> str:
+    if not u.dota_friend_id:
+        return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
+    line = t("profile.dota.linked", friend=u.dota_friend_id, status=_status(u.dota_status))
+    if u.dota_status == "approved":
+        medal = opendota.dota_rank_name(u.dota_rank_tier, u.dota_leaderboard)
+        line += "\n" + t("profile.dota.rank", rank=medal or t("profile.dota.unranked"))
     return line
 
 
@@ -83,18 +100,12 @@ def _profile_embed(member: discord.Member, u: User) -> discord.Embed:
         ),
         color=game_color(main) if main else EMBED_COLOR,
     )
-    e.add_field(
-        name=f"{game_mark('valorant')} {games_svc.game_label('valorant')}",
-        value=_valorant_value(u), inline=False,
-    )
-    e.add_field(
-        name=f"{game_mark('cs2')} {games_svc.game_label('cs2')}",
-        value=_steam_value(u, with_friend=False), inline=True,
-    )
-    e.add_field(
-        name=f"{game_mark('dota2')} {games_svc.game_label('dota2')}",
-        value=_steam_value(u, with_friend=True), inline=True,
-    )
+    e.add_field(name=f"{game_mark('valorant')} {games_svc.game_label('valorant')}",
+                value=_valorant_value(u), inline=False)
+    e.add_field(name=f"{game_mark('cs2')} {games_svc.game_label('cs2')}",
+                value=_cs2_value(u), inline=True)
+    e.add_field(name=f"{game_mark('dota2')} {games_svc.game_label('dota2')}",
+                value=_dota_value(u), inline=True)
     return e
 
 
@@ -125,104 +136,148 @@ class ProfileCog(commands.Cog):
         except BotError as e:
             return await reply(itx, str(e))
         name, _, riot_tag = tag.partition("#")
-        # Verifying against HenrikDev can take a few seconds — well past
-        # Discord's 3s ack window.
         await itx.response.defer(ephemeral=True)
         try:
             account = await henrik.fetch_account(name, riot_tag)
         except henrik.AccountNotFound:
-            log.info("register: %s not found for user %s", tag, itx.user.id)
             return await reply(itx, t("error.riot_not_found", tag=tag))
         except henrik.RateLimited:
-            log.info("register: rate limited resolving %s for user %s", tag, itx.user.id)
             return await reply(itx, t("error.riot_rate_limited"))
         except henrik.HenrikTimeout:
-            log.info("register: timed out resolving %s for user %s", tag, itx.user.id)
             return await reply(itx, t("error.riot_timeout"))
-        except henrik.HenrikError as e:
-            log.warning("register: %s unavailable resolving %s for user %s", e, tag, itx.user.id)
+        except henrik.HenrikError:
             return await reply(itx, t("error.riot_unavailable"))
 
         canonical = f"{account.name}#{account.tag}"
         async with SessionLocal() as s:
             u = await _ensure_player(s, itx.guild_id, itx.user.id)
-            # A denial is contestable — resubmitting the identical tag after
-            # one must be able to go back to pending, not stay stuck. But
-            # re-registering the same tag while already approved (e.g. just
-            # to change main_role) must not silently revoke that approval.
             resubmit = u.riot_id != canonical or u.riot_status == "denied"
             u.riot_id, u.riot_puuid, u.riot_region = canonical, account.puuid, account.region
             if resubmit:
                 u.riot_status = "pending"
-                u.riot_reviewed_by = None
-                u.riot_reviewed_at = None
+                u.riot_reviewed_by = u.riot_reviewed_at = None
                 u.cur_rank = u.cur_rr = u.peak_rank = None
                 u.rank_updated_at = None
             if main_role:
                 u.main_role = main_role.value
             await s.commit()
-        log.info("register: user %s submitted %s (resubmit=%s)",
-                 itx.user.id, canonical, resubmit)
+        log.info("register: user %s submitted %s (resubmit=%s)", itx.user.id, canonical, resubmit)
         msg_key = "profile.register.pending" if resubmit else "profile.register.unchanged"
         await reply(itx, t(msg_key, tag=canonical))
 
-    @app_commands.command(description=L("cmd.profile.unregister.desc"))
-    async def unregister(self, itx: discord.Interaction):
-        async with SessionLocal() as s:
-            u = await s.get(User, itx.user.id)
-            if not u or not u.riot_id:
-                return await reply(itx, t("profile.none"))
-            # Only the Riot identity resets — main_role, wins, Steam and the
-            # player MemberRole are earned/kept independently.
-            u.riot_id = u.riot_puuid = u.riot_region = None
-            u.riot_status = u.riot_reviewed_by = u.riot_reviewed_at = None
-            u.cur_rank = u.cur_rr = u.peak_rank = u.rank_updated_at = None
-            await s.commit()
-        log.info("unregister: user %s cleared their riot id", itx.user.id)
-        await reply(itx, t("profile.unregister.done"))
-
-    @app_commands.command(description=L("cmd.profile.refresh.desc"))
-    async def refresh_rank(self, itx: discord.Interaction):
-        async with SessionLocal() as s:
-            u = await s.get(User, itx.user.id)
-        if not u or not u.riot_id:
-            return await reply(itx, t("profile.none"))
-        if u.riot_status != "approved":
-            return await reply(itx, t("profile.refresh.not_approved"))
+    # --------------------------------------------------------- CS2 (Faceit) --
+    @app_commands.command(description=L("cmd.register_cs2.desc"))
+    @app_commands.describe(faceit_nickname=L("cmd.register_cs2.nick"))
+    async def register_cs2(self, itx: discord.Interaction, faceit_nickname: str):
+        nick = faceit_nickname.strip()
+        if not nick:
+            return await reply(itx, t("profile.cs2.empty"))
         await itx.response.defer(ephemeral=True)
-        log.info("refresh_rank: manual refresh requested by user %s", itx.user.id)
-        before = u.rank_updated_at
-        u = await rank_sync.refresh_rank(itx.user.id, force=True)
-        if u and u.rank_updated_at != before:
-            await reply(itx, t("profile.refresh.done", rank=u.cur_rank or DASH,
-                               rr=str(u.cur_rr) if u.cur_rr is not None else DASH,
-                               peak=u.peak_rank or DASH))
-        else:
-            log.info("refresh_rank: no update landed for user %s", itx.user.id)
-            await reply(itx, t("profile.refresh.failed"))
+        try:
+            player = await faceit.fetch_player(nick)
+        except faceit.FaceitNotConfigured:
+            return await reply(itx, t("error.faceit_unconfigured"))
+        except faceit.AccountNotFound:
+            return await reply(itx, t("error.faceit_not_found", nick=nick))
+        except faceit.RateLimited:
+            return await reply(itx, t("error.faceit_rate_limited"))
+        except faceit.FaceitTimeout:
+            return await reply(itx, t("error.faceit_timeout"))
+        except faceit.FaceitError:
+            return await reply(itx, t("error.faceit_unavailable"))
 
-    # ----------------------------------------------------- CS2 / Dota 2 ------
+        async with SessionLocal() as s:
+            u = await _ensure_player(s, itx.guild_id, itx.user.id)
+            resubmit = u.cs2_faceit_id != player.player_id or u.cs2_status == "denied"
+            u.cs2_nick, u.cs2_faceit_id = player.nickname, player.player_id
+            if resubmit:
+                u.cs2_status = "pending"
+                u.cs2_reviewed_by = u.cs2_reviewed_at = None
+                u.cs2_level = u.cs2_elo = u.cs2_updated_at = None
+            await s.commit()
+        log.info("register_cs2: user %s submitted %s (resubmit=%s)",
+                 itx.user.id, player.nickname, resubmit)
+        msg_key = "profile.cs2.pending" if resubmit else "profile.cs2.unchanged"
+        await reply(itx, t(msg_key, nick=player.nickname))
+
+    # ---------------------------------------------------------- Dota (OpenDota)
+    @app_commands.command(description=L("cmd.register_dota.desc"))
+    @app_commands.describe(friend_id=L("cmd.register_dota.friend"))
+    async def register_dota(self, itx: discord.Interaction, friend_id: str):
+        raw = friend_id.strip()
+        if not raw.isdigit():
+            return await reply(itx, t("error.dota_bad_id"))
+        await itx.response.defer(ephemeral=True)
+        try:
+            player = await opendota.fetch_player(int(raw))
+        except opendota.AccountNotFound:
+            return await reply(itx, t("error.dota_not_found", friend=raw))
+        except opendota.RateLimited:
+            return await reply(itx, t("error.dota_rate_limited"))
+        except opendota.DotaTimeout:
+            return await reply(itx, t("error.dota_timeout"))
+        except opendota.DotaError:
+            return await reply(itx, t("error.dota_unavailable"))
+
+        async with SessionLocal() as s:
+            u = await _ensure_player(s, itx.guild_id, itx.user.id)
+            resubmit = u.dota_friend_id != raw or u.dota_status == "denied"
+            u.dota_friend_id = raw
+            if resubmit:
+                u.dota_status = "pending"
+                u.dota_reviewed_by = u.dota_reviewed_at = None
+                u.dota_rank_tier = u.dota_leaderboard = u.dota_updated_at = None
+            await s.commit()
+        log.info("register_dota: user %s submitted %s (resubmit=%s)", itx.user.id, raw, resubmit)
+        msg_key = "profile.dota.pending" if resubmit else "profile.dota.unchanged"
+        await reply(itx, t(msg_key, friend=raw))
+
+    # ------------------------------------------------------ Steam (cosmetic) --
     @app_commands.command(description=L("cmd.link.desc"))
-    @app_commands.describe(steam=L("cmd.link.steam"), dota_friend_id=L("cmd.link.friend"))
-    async def link(self, itx: discord.Interaction, steam: str,
-                   dota_friend_id: str | None = None):
-        """Link a Steam handle — it covers both CS2 and Dota 2."""
+    @app_commands.describe(steam=L("cmd.link.steam"))
+    async def link(self, itx: discord.Interaction, steam: str):
         steam = steam.strip()
         if not steam:
             return await reply(itx, t("profile.link.empty"))
         async with SessionLocal() as s:
             u = await _ensure_player(s, itx.guild_id, itx.user.id)
             u.steam_id = steam[:64]
-            if dota_friend_id is not None:
-                u.dota_friend_id = dota_friend_id.strip()[:32] or None
             await s.commit()
-        log.info("link: user %s linked steam", itx.user.id)
         await reply(itx, t("profile.link.done", steam=steam[:64]))
 
+    @app_commands.command(description=L("cmd.setmain.desc"))
+    @app_commands.describe(game=L("cmd.setmain.game"))
+    @app_commands.choices(game=_GAME_CHOICES)
+    async def setmain(self, itx: discord.Interaction, game: app_commands.Choice[str]):
+        async with SessionLocal() as s:
+            u = await _ensure_player(s, itx.guild_id, itx.user.id)
+            u.main_game = game.value
+            await s.commit()
+        await reply(itx, t("profile.main.done", game=games_svc.game_label(game.value)))
+
+    # ------------------------------------------------------------ refresh ----
+    @app_commands.command(description=L("cmd.profile.refresh.desc"))
+    async def refresh_rank(self, itx: discord.Interaction):
+        async with SessionLocal() as s:
+            u = await s.get(User, itx.user.id)
+        approved = bool(u) and any(
+            getattr(u, f) == "approved"
+            for f in ("riot_status", "cs2_status", "dota_status")
+        )
+        if not approved:
+            return await reply(itx, t("profile.refresh.not_approved"))
+        await itx.response.defer(ephemeral=True)
+        log.info("refresh_rank: manual refresh requested by user %s", itx.user.id)
+        await rank_sync.refresh_all(itx.user.id, force=True)
+        await reply(itx, t("profile.refresh.done_all"))
+
+    # ------------------------------------------------------------ unlink -----
     @app_commands.command(description=L("cmd.unlink.desc"))
     @app_commands.describe(what=L("cmd.unlink.what"))
     @app_commands.choices(what=[
         app_commands.Choice(name=L("profile.unlink.opt.valorant"), value="valorant"),
+        app_commands.Choice(name=L("profile.unlink.opt.cs2"), value="cs2"),
+        app_commands.Choice(name=L("profile.unlink.opt.dota"), value="dota2"),
         app_commands.Choice(name=L("profile.unlink.opt.steam"), value="steam"),
     ])
     async def unlink(self, itx: discord.Interaction, what: app_commands.Choice[str]):
@@ -236,23 +291,38 @@ class ProfileCog(commands.Cog):
                 u.riot_id = u.riot_puuid = u.riot_region = None
                 u.riot_status = u.riot_reviewed_by = u.riot_reviewed_at = None
                 u.cur_rank = u.cur_rr = u.peak_rank = u.rank_updated_at = None
-            else:  # steam (CS2 + Dota 2)
+            elif what.value == "cs2":
+                if not u.cs2_nick:
+                    return await reply(itx, t("profile.unlink.nothing"))
+                u.cs2_nick = u.cs2_faceit_id = None
+                u.cs2_status = u.cs2_reviewed_by = u.cs2_reviewed_at = None
+                u.cs2_level = u.cs2_elo = u.cs2_updated_at = None
+            elif what.value == "dota2":
+                if not u.dota_friend_id:
+                    return await reply(itx, t("profile.unlink.nothing"))
+                u.dota_friend_id = None
+                u.dota_status = u.dota_reviewed_by = u.dota_reviewed_at = None
+                u.dota_rank_tier = u.dota_leaderboard = u.dota_updated_at = None
+            else:  # steam
                 if not u.steam_id:
                     return await reply(itx, t("profile.unlink.nothing"))
-                u.steam_id = u.dota_friend_id = None
+                u.steam_id = None
             await s.commit()
         log.info("unlink: user %s cleared %s", itx.user.id, what.value)
         await reply(itx, t("profile.unlink.done", what=what.name))
 
-    @app_commands.command(description=L("cmd.setmain.desc"))
-    @app_commands.describe(game=L("cmd.setmain.game"))
-    @app_commands.choices(game=_GAME_CHOICES)
-    async def setmain(self, itx: discord.Interaction, game: app_commands.Choice[str]):
+    @app_commands.command(description=L("cmd.profile.unregister.desc"))
+    async def unregister(self, itx: discord.Interaction):
+        """Legacy alias — clears the Valorant Riot ID only."""
         async with SessionLocal() as s:
-            u = await _ensure_player(s, itx.guild_id, itx.user.id)
-            u.main_game = game.value
+            u = await s.get(User, itx.user.id)
+            if not u or not u.riot_id:
+                return await reply(itx, t("profile.none"))
+            u.riot_id = u.riot_puuid = u.riot_region = None
+            u.riot_status = u.riot_reviewed_by = u.riot_reviewed_at = None
+            u.cur_rank = u.cur_rr = u.peak_rank = u.rank_updated_at = None
             await s.commit()
-        await reply(itx, t("profile.main.done", game=games_svc.game_label(game.value)))
+        await reply(itx, t("profile.unregister.done"))
 
     # ------------------------------------------------------------ view -------
     @app_commands.command(description=L("cmd.profile.view.desc"))
@@ -260,15 +330,16 @@ class ProfileCog(commands.Cog):
         member = member or itx.user
         async with SessionLocal() as s:
             u = await s.get(User, member.id)
-        if not u or not (u.riot_id or u.steam_id or u.main_game):
+        if not u or not (u.riot_id or u.cs2_nick or u.dota_friend_id
+                         or u.steam_id or u.main_game):
             return await reply(itx, t("profile.none"))
-        # Deliberately public and permanent, unlike every other reply() /
-        # Screen in the bot: a profile is a durable reference teammates check
-        # when picking captains, not a transient confirmation. Refreshing an
-        # approved player's rank can hit the network, so defer first.
+        # Deliberately public and permanent: a profile is a durable reference
+        # teammates check when picking captains. Refreshing can hit the network,
+        # so defer first.
         await itx.response.defer()
-        if u.riot_status == "approved":
-            u = await rank_sync.refresh_rank(member.id) or u
+        await rank_sync.refresh_all(member.id)
+        async with SessionLocal() as s:
+            u = await s.get(User, member.id) or u
         await itx.followup.send(embed=_profile_embed(member, u))
 
 

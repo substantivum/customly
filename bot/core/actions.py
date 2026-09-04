@@ -438,21 +438,22 @@ async def _queue_for_custom(custom_id: int) -> Queue:
     return q
 
 
-async def _players_meta(ids: list[int], *, refresh_ranks: bool = False) -> list[dict]:
+async def _players_meta(
+    ids: list[int], *, game: str = "valorant", refresh_ranks: bool = False
+) -> list[dict]:
     if refresh_ranks:
         # Captains are being chosen off this data right now, so a cached
-        # value isn't good enough here — force past the normal TTL.
+        # value isn't good enough here — force past the normal TTL. Only the
+        # game being played is worth refreshing.
         for uid in ids:
-            await rank_sync.refresh_rank(uid, force=True)  # best-effort, never raises
+            await rank_sync.refresh_for_game(uid, game, force=True)  # never raises
     async with SessionLocal() as s:
         out = []
         for uid in ids:
             u = await s.get(User, uid)
-            approved = bool(u) and u.riot_status == "approved"
-            out.append({"user_id": uid,
-                        "wins": u.wins if u else 0,
-                        "cur_rr": u.cur_rr if approved else None,
-                        "peak_rank": u.peak_rank if approved else None})
+            meta = {"user_id": uid, "wins": u.wins if u else 0}
+            meta.update(rank_sync.captain_metrics(u, game))
+            out.append(meta)
         return out
 
 
@@ -831,7 +832,7 @@ async def begin_match(
     board.schedule(guild)
 
     players_meta = await _players_meta(
-        member_ids, refresh_ranks=captains in draft_svc.RANK_METHODS
+        member_ids, game=c.game, refresh_ranks=captains in draft_svc.RANK_METHODS
     )
     fell_back, original_method = False, captains
     if captains in draft_svc.RANK_METHODS and not draft_svc.has_enough_rank_data(

@@ -91,8 +91,10 @@ class CustomlyBot(commands.Bot):
 
     async def close(self) -> None:
         from bot.db import engine
-        from bot.services import henrik
+        from bot.services import faceit, henrik, opendota
         await henrik.close()
+        await faceit.close()
+        await opendota.close()
         await super().close()
         await engine.dispose()
 

@@ -72,11 +72,32 @@ class User(Base):
     # code (bot.cogs.profile), not by a CHECK, since SQLite can't ALTER one in.
     main_game: Mapped[str | None] = mapped_column(String(16))
     # Steam identity, shared by CS2 and Dota 2 (one Steam account covers both).
-    # Trust-based like the Riot ID minus the API: there's no Steam verification
-    # wired up, so this is whatever handle the player gives.
+    # A cosmetic handle: rank comes from Faceit (CS2) and OpenDota (Dota) below,
+    # not from this. Trust-based, no verification.
     steam_id: Mapped[str | None] = mapped_column(String(64))
-    # Dota 2's in-game friend id, optional even when Steam is linked.
+
+    # CS2 rank identity, via the Faceit Data API. Mirrors the Riot block: a
+    # submitted nickname is `pending` until an admin approves it, and only then
+    # do level/elo count. `cs2_faceit_id` is Faceit's stable player id (the
+    # nickname can change), so every refresh keys on it.
+    cs2_nick: Mapped[str | None] = mapped_column(String(64))        # canonical Faceit nickname
+    cs2_faceit_id: Mapped[str | None] = mapped_column(String(64))   # stable player_id
+    cs2_status: Mapped[str | None] = mapped_column(String(16))      # pending|approved|denied
+    cs2_reviewed_by: Mapped[int | None] = mapped_column(Integer)
+    cs2_reviewed_at: Mapped[datetime | None] = mapped_column()
+    cs2_level: Mapped[int | None] = mapped_column(Integer)          # Faceit skill level 1-10
+    cs2_elo: Mapped[int | None] = mapped_column(Integer)
+    cs2_updated_at: Mapped[datetime | None] = mapped_column()       # cache staleness clock
+
+    # Dota 2's in-game friend id (= account id / SteamID32) — the OpenDota key.
     dota_friend_id: Mapped[str | None] = mapped_column(String(32))
+    # Dota rank, via OpenDota. Same pending→approved gate as the others.
+    dota_status: Mapped[str | None] = mapped_column(String(16))     # pending|approved|denied
+    dota_reviewed_by: Mapped[int | None] = mapped_column(Integer)
+    dota_reviewed_at: Mapped[datetime | None] = mapped_column()
+    dota_rank_tier: Mapped[int | None] = mapped_column(Integer)     # medal*10 + stars (0/None = unknown)
+    dota_leaderboard: Mapped[int | None] = mapped_column(Integer)   # Immortal leaderboard place, if any
+    dota_updated_at: Mapped[datetime | None] = mapped_column()
     cur_rank: Mapped[str | None] = mapped_column(String(16))         # API-sourced, approved only
     peak_rank: Mapped[str | None] = mapped_column(String(16))
     cur_rr: Mapped[int | None] = mapped_column(Integer)

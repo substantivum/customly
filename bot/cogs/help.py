@@ -46,6 +46,8 @@ _SECTIONS: list[tuple[str, list[tuple[str, str, int]]]] = [
     ]),
     ("help.section.profile", [
         ("/register", "cmd.profile.register.desc", PLAYER),
+        ("/register_cs2", "cmd.register_cs2.desc", PLAYER),
+        ("/register_dota", "cmd.register_dota.desc", PLAYER),
         ("/link", "cmd.link.desc", PLAYER),
         ("/setmain", "cmd.setmain.desc", PLAYER),
         ("/profile", "cmd.profile.view.desc", PLAYER),

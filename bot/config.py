@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     # (unauthenticated, lower rate limit); set it for the higher tier.
     henrik_api_key: str | None = None
 
+    # Faceit Data API (https://developers.faceit.com) — verifies CS2 Faceit
+    # nicknames and fetches skill level + elo. REQUIRED for CS2 rank: unlike
+    # Henrik, Faceit rejects unauthenticated calls, so /register_cs2 tells the
+    # player it isn't set up until this is present.
+    faceit_api_key: str | None = None
+
+    # OpenDota (https://docs.opendota.com) — verifies Dota 2 accounts by friend
+    # id and fetches the rank medal. The free tier needs no key; set one only to
+    # raise the rate limit.
+    opendota_api_key: str | None = None
+
     # Server-local time. Discord exposes no per-user timezone, so a bare `HH:MM`
     # start time is read in this zone: 6 = UTC+6 (Bishkek), -5 = UTC-5.
     tz_offset: int = 0

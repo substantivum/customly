@@ -71,8 +71,8 @@ from bot.services import games as games_svc
 from bot.services import guild_svc
 from bot.services import maps as maps_svc
 from bot.services import panel_svc
+from bot.services import approvals as appr_svc
 from bot.services import rank_sync
-from bot.services import riot_approvals as riot_svc
 
 TIER_LEVEL = {"player": PLAYER, "admin": ADMIN, "superadmin": SUPER}
 TIER_KEY = {"player": "tier.player", "admin": "tier.admin",
@@ -1050,58 +1050,64 @@ class BansScreen(_Gated):
                                member=view.target.mention))
 
 
-# ------------------------------------------------------ admin: riot approvals
-class RiotApprovalsScreen(_Gated):
-    """A submitted Riot ID counts nowhere in the bot (rank data, captain
-    selection) until an admin approves it here — see bot/services/henrik.py
-    for why the API call alone can't be the whole story."""
+# ---------------------------------------------------- admin: rank approvals
+class RankApprovalsScreen(_Gated):
+    """A submitted identity (Riot ID, Faceit nickname, Dota friend id) counts
+    nowhere in the bot until an admin approves it here — no OAuth proves a
+    Discord user owns any of these accounts, so a human is the trust step. One
+    queue for all three games."""
 
     LEVEL = ADMIN
 
     def __init__(self, guild: discord.Guild, parent: Screen | None = None):
         super().__init__(parent)
         self.guild = guild
-        self.target_id: int | None = None
-        self._pending: list[User] = []
+        # (user_id, game) of the highlighted submission, or None.
+        self.target: tuple[int, str] | None = None
+        self._pending: list = []
 
     async def embed(self) -> discord.Embed:
-        self._pending = await riot_svc.list_pending()
+        self._pending = await appr_svc.list_pending()
         e = discord.Embed(
-            title=t("screen.riot_approvals.title"),
-            description=t("screen.riot_approvals.desc"),
+            title=t("screen.rank_approvals.title"),
+            description=t("screen.rank_approvals.desc"),
             color=EMBED_COLOR,
         )
         e.add_field(
-            name=t("screen.riot_approvals.count", n=len(self._pending)),
-            value=("\n".join(f"• {member_name(self.guild, u.user_id)} — `{u.riot_id}`"
-                             for u in self._pending[:20]) or DASH)[:1024],
+            name=t("screen.rank_approvals.count", n=len(self._pending)),
+            value=("\n".join(
+                t("screen.rank_approvals.line", mark=game_mark(p.game),
+                  member=member_name(self.guild, p.user_id), identity=p.identity)
+                for p in self._pending[:20]) or DASH)[:1024],
             inline=False,
         )
         if len(self._pending) > 20:
-            e.set_footer(text=t("screen.riot_approvals.more", n=len(self._pending) - 20))
+            e.set_footer(text=t("screen.rank_approvals.more", n=len(self._pending) - 20))
         return e
 
     async def build(self) -> None:
         if self._pending:
-            self.add_item(self._Picker(self._pending, self.guild, self.target_id))
-        self.add_item(self._Approve(disabled=self.target_id is None))
-        self.add_item(self._Deny(disabled=self.target_id is None))
+            self.add_item(self._Picker(self._pending, self.guild, self.target))
+        self.add_item(self._Approve(disabled=self.target is None))
+        self.add_item(self._Deny(disabled=self.target is None))
 
     class _Picker(discord.ui.Select):
-        def __init__(self, pending: list[User], guild: discord.Guild, selected: int | None):
+        def __init__(self, pending: list, guild: discord.Guild, selected):
             opts = [
                 discord.SelectOption(
-                    label=u.riot_id[:100],
-                    description=member_name(guild, u.user_id)[:100],
-                    value=str(u.user_id),
-                    default=u.user_id == selected,
+                    label=f"{game_mark(p.game)} {p.identity}"[:100],
+                    description=f"{games_svc.game_label(p.game)} · "
+                                f"{member_name(guild, p.user_id)}"[:100],
+                    value=f"{p.game}:{p.user_id}",
+                    default=selected == (p.user_id, p.game),
                 )
-                for u in pending[:25]
+                for p in pending[:25]
             ]
-            super().__init__(placeholder=t("screen.riot_approvals.pick"), options=opts, row=0)
+            super().__init__(placeholder=t("screen.rank_approvals.pick"), options=opts, row=0)
 
         async def callback(self, itx: discord.Interaction):
-            self.view.target_id = int(self.values[0])
+            game, uid = self.values[0].split(":", 1)
+            self.view.target = (int(uid), game)
             await self.view.reload(itx)
 
     class _Approve(discord.ui.Button):
@@ -1110,7 +1116,7 @@ class RiotApprovalsScreen(_Gated):
                              disabled=disabled, row=1)
 
         async def callback(self, itx: discord.Interaction):
-            await _resolve_riot(itx, self.view, approve=True)
+            await _resolve_approval(itx, self.view, approve=True)
 
     class _Deny(discord.ui.Button):
         def __init__(self, *, disabled):
@@ -1118,33 +1124,42 @@ class RiotApprovalsScreen(_Gated):
                              disabled=disabled, row=1)
 
         async def callback(self, itx: discord.Interaction):
-            await _resolve_riot(itx, self.view, approve=False)
+            await _resolve_approval(itx, self.view, approve=False)
 
 
-async def _resolve_riot(
-    itx: discord.Interaction, view: RiotApprovalsScreen, *, approve: bool
+def _pending_identity(u: User, game: str) -> str:
+    return {"cs2": u.cs2_nick, "dota2": u.dota_friend_id}.get(game, u.riot_id) or ""
+
+
+async def _resolve_approval(
+    itx: discord.Interaction, view: RankApprovalsScreen, *, approve: bool
 ) -> None:
     await itx.response.defer()
-    u = await riot_svc.resolve(view.target_id, itx.user.id, approve=approve)
-    view.target_id = None
+    if not view.target:
+        return await view.reload(itx)
+    uid, game = view.target
+    u = await appr_svc.resolve(uid, game, itx.user.id, approve=approve)
+    view.target = None
     if not u:
         await view.reload(itx)
-        return await reply(itx, t("riot_approvals.gone"))
+        return await reply(itx, t("rank_approvals.gone"))
     await audit.log(itx.guild_id, itx.user.id,
-                    "riot_approve" if approve else "riot_deny", str(u.user_id))
+                    "rank_approve" if approve else "rank_deny", f"{game}:{u.user_id}")
     if approve:
-        await rank_sync.refresh_rank(u.user_id, force=True)
+        await rank_sync.refresh_for_game(u.user_id, game, force=True)
     member = itx.guild.get_member(u.user_id)
     if member:
         try:
-            key = "riot.dm.approved" if approve else "riot.dm.denied"
-            await member.send(t(key, tag=u.riot_id, guild=itx.guild.name))
+            key = "rank.dm.approved" if approve else "rank.dm.denied"
+            await member.send(t(key, identity=_pending_identity(u, game),
+                                game=games_svc.game_label(game), guild=itx.guild.name))
         except discord.HTTPException:
             pass
     await view.reload(itx)
     board.schedule(itx.guild)
-    await reply(itx, t("riot_approvals.approved" if approve else "riot_approvals.denied",
-                       member=member.mention if member else member_name(itx.guild, u.user_id)))
+    await reply(itx, t("rank_approvals.approved" if approve else "rank_approvals.denied",
+                       member=member.mention if member else member_name(itx.guild, u.user_id),
+                       game=games_svc.game_label(game)))
 
 
 # ----------------------------------------------------------- shared: audit --
@@ -1463,8 +1478,8 @@ async def _open_bans(itx, view):
     await BansScreen(itx.guild_id).open(itx)
 
 
-async def _open_riot_approvals(itx, view):
-    await RiotApprovalsScreen(itx.guild).open(itx)
+async def _open_rank_approvals(itx, view):
+    await RankApprovalsScreen(itx.guild).open(itx)
 
 
 async def _open_audit(itx, view):
@@ -1521,7 +1536,7 @@ class AdminBoard(_BoardView):
         ("btn.manage_customs", "panel:admin:manage", PRIMARY, 0, _open_manage_own),
         ("btn.maps", "panel:admin:maps", SECONDARY, 0, _open_maps),
         ("btn.bans", "panel:admin:bans", DANGER, 1, _open_bans),
-        ("btn.riot_approvals", "panel:admin:riot_approvals", PRIMARY, 1, _open_riot_approvals),
+        ("btn.riot_approvals", "panel:admin:riot_approvals", PRIMARY, 1, _open_rank_approvals),
         ("btn.audit", "panel:admin:audit", SECONDARY, 1, _open_audit),
         ("btn.refresh", "panel:admin:refresh", SECONDARY, 1, _do_refresh),
     )
@@ -1534,7 +1549,7 @@ class SuperBoard(_BoardView):
         ("btn.manage_any", "panel:super:manage", PRIMARY, 0, _open_manage_any),
         ("btn.audit", "panel:super:audit", SECONDARY, 0, _open_audit),
         ("btn.language", "panel:super:language", SECONDARY, 0, _open_language),
-        ("btn.riot_approvals", "panel:super:riot_approvals", PRIMARY, 1, _open_riot_approvals),
+        ("btn.riot_approvals", "panel:super:riot_approvals", PRIMARY, 1, _open_rank_approvals),
         ("btn.prune", "panel:super:prune", DANGER, 1, _open_prune),
         ("btn.refresh", "panel:super:refresh", SECONDARY, 1, _do_refresh),
     )
