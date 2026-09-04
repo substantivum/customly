@@ -781,20 +781,20 @@ STRINGS: dict[str, str] = {
     "profile.status.approved": "подтверждён",
     "profile.status.denied": "отклонён",
     "profile.val.linked": (
-        "Riot ID: **{riot}** ({status})\n"
+        "Riot ID: **{riot}**{status}\n"
         "Ранг: {rank} · {rr} RR · Пик: {peak}\n"
         "Роль: {role}"
     ),
     "profile.steam.line": "Steam: `{steam}`",
     "profile.dota.friend": "Friend ID: `{friend}`",
     # CS2 (Faceit)
-    "profile.cs2.linked": "Faceit: **{nick}** ({status})",
+    "profile.cs2.linked": "Faceit: **{nick}**{status}",
     "profile.cs2.rank": "Уровень {level} · {elo} elo",
     "profile.cs2.empty": "Укажите ваш ник Faceit для регистрации.",
     "profile.cs2.pending": "Faceit **{nick}** отправлен на проверку админу.",
     "profile.cs2.unchanged": "По-прежнему **{nick}** — статус проверки не изменился.",
     # Dota 2 (OpenDota)
-    "profile.dota.linked": "Friend ID: `{friend}` ({status})",
+    "profile.dota.linked": "Friend ID: `{friend}`{status}",
     "profile.dota.rank": "Ранг: {rank}",
     "profile.dota.unranked": "Без ранга",
     "profile.dota.pending": "Friend id **{friend}** отправлен на проверку админу.",

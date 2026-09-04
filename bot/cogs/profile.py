@@ -47,8 +47,12 @@ async def _ensure_player(s, guild_id: int, user_id: int) -> User:
     return u
 
 
-def _status(status: str | None) -> str:
-    return t(f"profile.status.{status}") if status else DASH
+def _status_suffix(status: str | None) -> str:
+    """` (pending review)` / ` (denied)` after an identity — nothing once it's
+    approved, since at that point the rank line beneath it says it all."""
+    if not status or status == "approved":
+        return ""
+    return f" ({t(f'profile.status.{status}')})"
 
 
 # --------------------------------------------------------- per-game values ----
@@ -58,7 +62,7 @@ def _valorant_value(u: User) -> str:
     approved = u.riot_status == "approved"
     return t(
         "profile.val.linked",
-        riot=u.riot_id, status=_status(u.riot_status),
+        riot=u.riot_id, status=_status_suffix(u.riot_status),
         rank=(u.cur_rank or DASH) if approved else DASH,
         rr=(str(u.cur_rr) if u.cur_rr is not None else DASH) if approved else DASH,
         peak=(u.peak_rank or DASH) if approved else DASH,
@@ -69,7 +73,7 @@ def _valorant_value(u: User) -> str:
 def _cs2_value(u: User) -> str:
     if not u.cs2_nick:
         return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
-    line = t("profile.cs2.linked", nick=u.cs2_nick, status=_status(u.cs2_status))
+    line = t("profile.cs2.linked", nick=u.cs2_nick, status=_status_suffix(u.cs2_status))
     if u.cs2_status == "approved":
         line += "\n" + t(
             "profile.cs2.rank",
@@ -82,7 +86,8 @@ def _cs2_value(u: User) -> str:
 def _dota_value(u: User) -> str:
     if not u.dota_friend_id:
         return t("profile.steam.line", steam=u.steam_id) if u.steam_id else t("profile.not_linked")
-    line = t("profile.dota.linked", friend=u.dota_friend_id, status=_status(u.dota_status))
+    line = t("profile.dota.linked", friend=u.dota_friend_id,
+             status=_status_suffix(u.dota_status))
     if u.dota_status == "approved":
         medal = opendota.dota_rank_name(u.dota_rank_tier, u.dota_leaderboard)
         line += "\n" + t("profile.dota.rank", rank=medal or t("profile.dota.unranked"))

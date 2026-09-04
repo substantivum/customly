@@ -793,20 +793,20 @@ STRINGS: dict[str, str] = {
     "profile.status.approved": "approved",
     "profile.status.denied": "denied",
     "profile.val.linked": (
-        "Riot ID: **{riot}** ({status})\n"
+        "Riot ID: **{riot}**{status}\n"
         "Rank: {rank} · {rr} RR · Peak: {peak}\n"
         "Role: {role}"
     ),
     "profile.steam.line": "Steam: `{steam}`",
     "profile.dota.friend": "Friend ID: `{friend}`",
     # CS2 (Faceit)
-    "profile.cs2.linked": "Faceit: **{nick}** ({status})",
+    "profile.cs2.linked": "Faceit: **{nick}**{status}",
     "profile.cs2.rank": "Level {level} · {elo} elo",
     "profile.cs2.empty": "Give your Faceit nickname to register.",
     "profile.cs2.pending": "Submitted Faceit **{nick}** — pending an admin's approval.",
     "profile.cs2.unchanged": "Still **{nick}** — no change to your review status.",
     # Dota 2 (OpenDota)
-    "profile.dota.linked": "Friend ID: `{friend}` ({status})",
+    "profile.dota.linked": "Friend ID: `{friend}`{status}",
     "profile.dota.rank": "Rank: {rank}",
     "profile.dota.unranked": "Unranked",
     "profile.dota.pending": "Submitted friend id **{friend}** — pending an admin's approval.",
