@@ -61,7 +61,7 @@ Every game shares the same flow — registration → ready check → coin toss �
 
 | | Valorant | CS2 | Dota 2 |
 |---|---|---|---|
-| Formats | BO1 / BO3 / BO5 | BO1 only | BO1 / BO3 / BO5 |
+| Formats | BO1 / BO3 / BO5 | BO1 only | BO1 only |
 | Map veto | Yes, with an attack/defence side pick | Yes (side decided by knife round in-game) | None — straight from the draft to the lobby |
 | Connect info | Party code | Server IP | Lobby name + password |
 

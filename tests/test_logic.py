@@ -623,11 +623,11 @@ def test_asap_parses_to_now_not_an_error():
 
 
 # ------------------------------------------------------------------ games ---
-def test_dota2_has_no_veto_but_keeps_all_formats():
+def test_dota2_has_no_veto_and_only_bo1():
     from bot.services.games import allowed_formats, has_veto
 
     assert has_veto("dota2") is False
-    assert allowed_formats("dota2") == ("BO1", "BO3", "BO5")
+    assert allowed_formats("dota2") == ("BO1",)
 
 
 def test_cs2_has_a_veto_but_only_bo1():

@@ -138,8 +138,9 @@ class CreateCustomModal(LocalizedModal):
             label=t("modal.create.name"), placeholder=t("modal.create.name_ph"),
             max_length=64,
         )
-        # CS2 is BO1-only (see bot.services.games) — the field is fixed rather
-        # than shown, so there's nothing to pick wrong.
+        # A game with a single allowed format (CS2, Dota 2 — see
+        # bot.services.games) gets the field fixed rather than shown, so there's
+        # nothing to pick wrong; its default carries the value on submit.
         self.fmt = discord.ui.TextInput(
             label=t("modal.create.fmt"), default="BO1", max_length=3
         )
@@ -151,7 +152,7 @@ class CreateCustomModal(LocalizedModal):
             required=False,
         )
         items = [self.name]
-        if game != "cs2":
+        if len(games_svc.allowed_formats(game)) > 1:
             items.append(self.fmt)
         items += [self.team_size, self.start]
         for item in items:

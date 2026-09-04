@@ -25,13 +25,13 @@ GAME_KEY = {
     "cs2": "game.cs2",
 }
 
-# CS2 is BO1-only by design (see plan): a veto against a small, admin-chosen
-# pool rather than the official 7-map BO3/BO5 sequence. Dota 2 keeps all three
-# formats — there's no veto, but the format still sets the scheduling block
-# (duration_h) used for the overlap check.
+# CS2 and Dota 2 are BO1-only by design: an inhouse is a single game. CS2's veto
+# runs against a small, admin-chosen pool rather than the official 7-map BO3/BO5
+# sequence; Dota 2 has no veto at all. A BO1 still reserves a one-hour
+# scheduling block (duration_h) for the overlap check. Only Valorant runs series.
 FORMATS = {
     "valorant": ("BO1", "BO3", "BO5"),
-    "dota2": ("BO1", "BO3", "BO5"),
+    "dota2": ("BO1",),
     "cs2": ("BO1",),
 }
 
