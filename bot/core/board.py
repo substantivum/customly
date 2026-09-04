@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.core.embeds import DASH, EMBED_COLOR, game_mark, member_name, start_text
+from bot.services import games as games_svc
 from bot.db import SessionLocal
 from bot.db.models import Ban, Custom, MemberRole
 from bot.i18n import LANG_NAME, t, use_lang
@@ -135,9 +136,6 @@ async def player_embed(guild: discord.Guild) -> discord.Embed:
 
 async def admin_embed(guild: discord.Guild) -> discord.Embed:
     customs = await active_customs(guild.id)
-    all_maps = await maps_svc.all_maps(guild.id)
-    enabled = [m.name for m in all_maps if m.enabled]
-    competitive = [m.name for m in all_maps if m.competitive and m.enabled]
     e = discord.Embed(
         title=t("board.admin.title"),
         description=t("board.admin.desc"),
@@ -148,16 +146,32 @@ async def admin_embed(guild: discord.Guild) -> discord.Embed:
         value=await customs_field(customs, with_owner=True, guild=guild),
         inline=False,
     )
-    e.add_field(
-        name=t("board.map_pool"),
-        value=(t("board.map_pool_count", enabled=len(enabled), total=len(all_maps))
-               if all_maps else t("board.map_pool_unseeded")),
-        inline=True,
-    )
+    # One pool per game that has a map veto — Dota 2 has none, so it's left out.
+    # Each game keeps its own list, so a single "13/13" line no longer tells the
+    # whole story once three games share the board.
+    pool_lines: list[str] = []
+    comp_lines: list[str] = []
+    for g in games_svc.GAMES:
+        if not games_svc.has_veto(g):
+            continue
+        gmaps = await maps_svc.all_maps(guild.id, g)
+        mark, label = game_mark(g), games_svc.game_label(g)
+        if gmaps:
+            en = sum(1 for m in gmaps if m.enabled)
+            pool_lines.append(
+                t("board.map_pool_line", mark=mark, game=label, enabled=en, total=len(gmaps))
+            )
+            comp = [m.name for m in gmaps if m.competitive and m.enabled]
+            if comp:
+                comp_lines.append(t("board.competitive_line", mark=mark, game=label,
+                                    maps=", ".join(comp)))
+        else:
+            pool_lines.append(t("board.map_pool_line_empty", mark=mark, game=label))
+    e.add_field(name=t("board.map_pool"), value="\n".join(pool_lines) or DASH, inline=False)
     e.add_field(
         name=t("board.competitive"),
-        value=", ".join(competitive) if competitive else DASH,
-        inline=True,
+        value="\n".join(comp_lines) if comp_lines else DASH,
+        inline=False,
     )
     return _stamp(e, t("board.footer.staff"))
 
